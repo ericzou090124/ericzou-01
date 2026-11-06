@@ -60,6 +60,7 @@
         二维码过期会<b>自动换成新的</b>，不用保存图片、不用手动重开页面</div>
       <div class="row">
         <button class="btn small warn" id="btn-qr">刷新二维码</button>
+        <button class="btn small primary" id="btn-start" style="display:none">启动 NapCat</button>
         <a class="btn small" id="btn-webui" href="#" target="_blank" rel="noopener">打开 NapCat 控制台</a>
       </div>
       <div class="acct" id="accounts"></div>
@@ -131,6 +132,9 @@ function render(d) {
   pill('#p-onebot', d.onebot_online ? '群文件接口 在线' : '群文件接口 离线',
        d.onebot_online ? 'ok' : 'off');
 
+  // NapCat 没运行时，显示「启动 NapCat」按钮
+  $('#btn-start').style.display = d.need_start ? '' : 'none';
+
   if (d.is_login) {
     pill('#p-phase', '登录成功', 'ok');
     $('#qrframe').innerHTML = '<div class="placeholder">登录已完成<br>正在自动恢复在线来源…</div>';
@@ -185,6 +189,29 @@ $('#btn-qr').onclick = async () => {
   if (!r.ok) banner('刷新失败：' + (r.error || '未知原因'), 'warn');
   await sleep(1200);
   tick();
+};
+
+$('#btn-start').onclick = async () => {
+  if ($('#btn-start').disabled) return;
+  $('#btn-start').disabled = true;
+  $('#btn-start').textContent = '启动中…';
+  banner('正在拉起本机 NapCat，请稍候（首次可能要等 QQ 登录完成）…', 'info');
+  let r;
+  try {
+    r = await (await fetch('/api/napcat/start', {method:'POST',
+              headers:{'Content-Type':'application/json'}, body:'{}'})).json();
+  } catch (e) {
+    banner('启动请求失败：' + e + '；也可手动打开控制台登录。', 'warn');
+    $('#btn-start').disabled = false; $('#btn-start').textContent = '启动 NapCat';
+    return;
+  }
+  if (r.ok) {
+    banner(r.msg || '已启动 NapCat，正在等待 WebUI 就绪，页面会自动刷新出二维码…', 'info');
+    lastQrKey = '';  // 让新二维码即使 key 相同也重新渲染
+  } else {
+    banner('启动失败：' + (r.error || '未知原因') + '；也可手动打开控制台登录。', 'warn');
+  }
+  $('#btn-start').disabled = false; $('#btn-start').textContent = '启动 NapCat';
 };
 
 tick();

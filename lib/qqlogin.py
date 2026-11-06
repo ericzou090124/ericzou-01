@@ -60,6 +60,25 @@ def webui_url() -> str:
         return "http://127.0.0.1:6099/webui"
 
 
+def _cfg_port() -> int:
+    try:
+        return _cfg()[1]
+    except Exception:
+        return 6099
+
+
+def is_webui_running(host: str = "127.0.0.1", port: int | None = None) -> bool:
+    """只做端口探活（不发任何业务请求），用于快速判断 NapCat 是否在线。"""
+    import socket
+    port = port or _cfg_port()
+    try:
+        s = socket.create_connection((host, port), timeout=2)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
 def _post(path: str, body: dict, bearer: str = "", timeout: float = 8) -> dict:
     host, port, _ = _cfg()
     headers = {"Content-Type": "application/json"}
@@ -132,6 +151,7 @@ def status() -> dict:
     """给登录页的一次性快照：二维码、扫码阶段、已保存账号、OneBot 是否恢复。"""
     out = {
         "ok": False, "webui_online": False, "webui_url": webui_url(),
+        "need_start": False,
         "is_login": False, "phase": "", "phase_text": "正在连接 NapCat…",
         "qr_key": "", "qr_image": "", "qr_source": "",
         "qr_login_accepted": False, "login_error": "",
@@ -172,9 +192,22 @@ def status() -> dict:
             pass
         if not out["qr_image"] and not out["is_login"]:
             out["hint"] = "暂时取不到二维码，请点「刷新二维码」重试；WebUI 控制台也可手动登录。"
-    except Exception as e:
-        out["hint"] = f"无法连接 NapCat WebUI：{type(e).__name__}: {str(e)[:120]}。" \
-                      f"请先启动 NapCat（或打开 WebUI 控制台 {out['webui_url']}）。"
+    except Exception as e:  # noqa: BLE001
+        # 这里是给用户看的提示，绝不能把原始 Python 异常（如 URLError/WinError 10061）
+        # 直接暴露到页面上。按错误性质给可操作的指引。
+        out["webui_online"] = False
+        out["need_start"] = True
+        etype = type(e).__name__
+        es = str(e)
+        if "10061" in es or etype in ("URLError", "ConnectionError", "TimeoutError",
+                                       "ConnectionRefusedError", "OSError"):
+            out["hint"] = (f"本机 NapCat 没有运行（WebUI 端口 {_cfg_port()} 无响应）。\n"
+                           f"点本页「启动 NapCat」按钮即可自动拉起；若没反应也可在浏览器打开 "
+                           f"{out['webui_url']} 手动登录。")
+        else:
+            out["hint"] = (f"无法连接 NapCat WebUI（{etype}）。\n"
+                           f"请确认 NapCat 已安装并打开控制台 {out['webui_url']}；"
+                           f"若已在运行仍报错，可能是令牌失效，请在控制台重新登录。")
     return out
 
 

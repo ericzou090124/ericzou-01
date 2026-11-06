@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ai, catalog, config, download, index, llm, qq, qqlogin, vault, wechat  # noqa: E402
+from lib import ai, catalog, config, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat  # noqa: E402
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -151,6 +151,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(p.lstrip("/"))
             if p == "/api/qqlogin/status":
                 return self._send(qqlogin.status())
+            if p == "/api/napcat/status":
+                return self._send({"ok": True, "running": napcat_launch.is_running(),
+                                   "url": qqlogin.webui_url()})
+            if p == "/api/napcat/start":
+                return self._send(napcat_launch.start())
             if p == "/api/health":
                 # _sync_source() 已在请求开头实时探活；这里用状态缓存，
                 # 避免 QQ 离线时每次健康检查都白等一次 OneBot 超时。
@@ -215,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(qqlogin.refresh_qrcode())
             if p == "/api/qqlogin/quick":
                 return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
+            if p == "/api/napcat/start":
+                return self._send(napcat_launch.start())
             if p == "/api/qqlogin/restore":
                 # 扫码确认后 OneBot 3000 通常要几秒才起来，等就绪再刷新来源，
                 # 这样用户不必回到主界面手动点「刷新来源」。

@@ -3,6 +3,25 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v1.2.2] - 2026-11-07
+
+修复登录页「无法连接 NapCat WebUI」相关的一连串问题，并补齐自测发现的其它易错环节。
+
+### 修复
+
+- **登录页直接报原始 Python 异常**：`lib/qqlogin.status()` 在 WebUI 连不上时把 `URLError: <urlopen error [WinError 10061] ...>` 这类原始异常塞进页面提示，用户看到的是一堆技术报错。改为按错误性质给出可操作指引，并新增 `need_start` 标记；连接类错误（端口无响应 / 超时 / 拒绝）统一提示「NapCat 未运行，点启动按钮或打开控制台」。
+- **NapCat 没运行时没有任何恢复手段**：登录页 / 主界面离线提示都只能干瞪眼。新增「启动 NapCat」按钮（登录页 `web/login.html`、主界面 `web/app.js` 离线提示），点击后由后端 `lib/napcat_launch.start()` 自动定位 NapCat 运行时（`napcat.bat`，兼容 OmniQQ-MCP 部署路径）并以独立进程拉起，最多等待 40 秒让 WebUI 端口就绪，页面自动刷新出二维码。
+- **新增接口** `GET /api/napcat/status`、`POST /api/napcat/start`，以及命令行工具 `tools/napcat_ctl.py` + `tools/start_napcat.bat` / `tools/start_napcat.sh`（双击即可手动拉起 NapCat）。
+- **自测补强（其它易错环节）**：
+  - `lib/napcat_launch` 只在用户显式触发时启动，不读不写任何令牌；启动用 `DETACHED_PROCESS` 脱离父控制台，关掉资源管理器也不会带走 NapCat。
+  - 登录页轮询在 `need_start` 变 false（WebUI 恢复）后自动隐藏「启动 NapCat」按钮，二维码正常显示。
+
+### 新增
+
+- `lib/napcat_launch.py`：定位 / 探活 / 拉起 NapCat 的独立模块。
+- `web/login.html`：新增「启动 NapCat」按钮与更清晰的离线指引文案。
+- `web/app.js`：主界面离线提示新增「启动 NapCat」按钮，点击后自动拉起并延时刷新来源。
+
 ## [v1.2.1] - 2026-11-07
 
 修复 v1.2.0 Release 压缩包「双击 install.bat 装不上」的问题。

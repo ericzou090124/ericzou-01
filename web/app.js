@@ -19,7 +19,7 @@ async function loadState() {
   state.counts = d.counts; state.source = d.source;
   const on = d.source.mode === 'live';
   const offlineNote = (!on && (d.source.errors || []).length)
-    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}<br>不用桌面图片：点右上角「QQ 登录」，网页里扫码即可自动恢复。</div>`
+    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}<br>通常是本机 NapCat 没运行。点「启动 NapCat」可自动拉起，或右上角「QQ 登录」网页里扫码：<button class="btn small primary" id="sb-napcat">启动 NapCat</button></div>`
     : '';
   const loginBtn = $('#btn-login');
   loginBtn.className = on ? 'btn' : 'btn warn';
@@ -29,6 +29,17 @@ async function loadState() {
     <div class="src"><span>微信</span><span class="badge off">未接入</span></div>
     ${offlineNote}
     <div class="muted" style="font-size:11px">${esc(Object.entries(d.source.groups || {}).map(([k,v]) => `${k} ${v.files}`).join(' · '))}</div>`;
+  const bn = $('#sb-napcat');
+  if (bn) bn.onclick = async () => {
+    toast('正在拉起 NapCat…', 4000);
+    let r;
+    try {
+      r = await (await fetch('/api/napcat/start', {method:'POST',
+              headers:{'Content-Type':'application/json'}, body:'{}'})).json();
+    } catch (e) { toast('启动请求失败：' + e.message, 7000); return; }
+    toast(r.ok ? (r.msg || '已启动 NapCat，稍后点「刷新来源」') : ('启动失败：' + (r.error || '')), 7000);
+    if (r.ok) setTimeout(() => $('#btn-refresh').click(), 9000);
+  };
   const w = d.wechat || {};
   $('#wechat-limits').innerHTML = `<details><summary>微信接入限制（点击展开）</summary>
     ${esc(w.reason || '')}<br>${Object.values(w.limits || {}).map(x => '· ' + esc(x)).join('<br>')}</details>`;
