@@ -191,6 +191,61 @@ def main():
         config.CFG = _orig_cfg
     print(f"[11] config_validate 正常配置 ok={_good['ok']}；坏配置正确报出 {len(_r['errors'])} 条错误")
 
+    # 下载重试：瞬时失败应重试后成功；永久失败(已失效)不重试
+    import tempfile as _tf2
+    _tmp2 = _P(_tf2.mkdtemp(prefix="rm_retry_test_"))
+    _ovc = config.vault
+    config.vault = lambda: _tmp2
+    class _CountQQ:
+        def __init__(self): self.n = 0
+        def online(self): return True
+        def fetch_url(self, gid, fid, busid):
+            self.n += 1
+            if self.n < 3:
+                raise RuntimeError("OneBot 超时（瞬时）")
+            return "http://example/x.pdf"
+        def download_to(self, url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True); dest.write_text("body")
+        def fmt_size(self, n): return f"{n}B"
+    class _PermQQ:
+        def __init__(self): self.n = 0
+        def online(self): return True
+        def fetch_url(self, gid, fid, busid):
+            self.n += 1
+            return None  # 触发『获取直链失败（...已失效...）』，属永久错误
+        def download_to(self, url, dest): dest.write_text("x")
+        def fmt_size(self, n): return f"{n}B"
+    _dcat_r = {"version": 1, "items": [{"id": "r-r1", "source": "QQ群", "group": "g", "path": "a.pdf",
+                                        "name": "a.pdf", "ext": ".pdf", "group_id": 1, "file_id": "f",
+                                        "busid": 102, "size_bytes": 1, "downloaded": False}]}
+    _dcat_p = {"version": 1, "items": [{"id": "r-r2", "source": "QQ群", "group": "g", "path": "b.pdf",
+                                        "name": "b.pdf", "ext": ".pdf", "group_id": 1, "file_id": "f",
+                                        "busid": 102, "size_bytes": 1, "downloaded": False}]}
+    os.environ["RM_DOWNLOAD_WORKERS"] = "1"  # 串行便于计数
+    _cq, _pq = _CountQQ(), _PermQQ()
+    try:
+        _orig_r = (_dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save)
+        # 瞬时失败重试
+        _dl.qq, _dl.vault, _dl.extract, _dl.index = _cq, _FakeVault(), _FakeExtract(), _FakeIndex()
+        _dl.catalog.save = lambda c: None
+        _rr = _dl.run(_dcat_r, ["r-r1"], confirm=True)
+        if _rr.get("succeeded") != 1:
+            fail(f"重试后仍未成功：{_rr}")
+        if _cq.n < 3:
+            fail(f"重试次数不足：fetch 被调用 {_cq.n} 次")
+        # 永久失败不重试
+        _dl.qq = _pq
+        _pr = _dl.run(_dcat_p, ["r-r2"], confirm=True)
+        if _pr.get("succeeded") != 0:
+            fail(f"永久失败应 0 成功：{_pr}")
+        if _pq.n != 1:
+            fail(f"永久错误不应重试（fetch 被调用 {_pq.n} 次）")
+    finally:
+        _dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save = _orig_r
+        config.vault = _ovc
+        os.environ.pop("RM_DOWNLOAD_WORKERS", None)
+    print(f"[12] 下载瞬时失败重试成功（fetch {_cq.n} 次后成功）；[13] 永久失败不重试（fetch {_pq.n} 次）")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}

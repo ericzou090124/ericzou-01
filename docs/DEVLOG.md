@@ -277,3 +277,17 @@
 **注意**：本地 curl 走代理会被拦（upstream connect failed），需 `--noproxy '*'`。这提示前端若在同一沙箱调试也需绕过代理访问 127.0.0.1；浏览器直连不受影响。
 
 **下一步**：v2.5.0 探索——下载失败重试/退避（QQ OneBot 偶发超时）、或 Obsidian 插件侧边栏检索增强。
+
+---
+
+## 迭代 v2.5.0 — 下载失败重试与退避（第 12 轮）
+
+目标：吸收 QQ OneBot 的瞬时超时/抖动，避免单条网络毛刺让整文件下载失败。
+
+**改动**：
+- 新增 `_fetch_with_retry(group_id, file_id, busid, dest, attempts)`：默认 3 次指数退避（0.5/1/2s，上限 3s），对瞬时异常重试；`fetch_url` 返回空（「已失效」）属永久错误，直接抛出不重试。
+- `RM_DOWNLOAD_RETRIES` 环境变量可调重试次数。
+
+**自测**：smoke_test 新增 `[12]`（瞬时失败 2 次后第 3 次成功，fetch 调用 3 次）与 `[13]`（永久「已失效」仅 1 次不重试）。ALL PASS。全程 patch `config.vault` 到临时目录 + `catalog.save` 为 no-op，确认不再污染真实数据。
+
+**下一步**：v2.6.0 探索——Obsidian 插件侧边栏检索增强、或下载断点续传（大文件分块）、或控制台/日志埋点便于排查。

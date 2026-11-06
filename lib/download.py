@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import concurrent.futures as _cf
 import os
+import time
 from pathlib import Path
 
 from . import catalog, config, download as _self, extract, index, qq, vault
@@ -43,6 +44,31 @@ def precheck(cat: dict, ids: list[str], scope: str, confirm: bool,
             "total_bytes": sum(int(x.get("size_bytes") or 0) for x in todo[:cap])}
 
 
+def _fetch_with_retry(group_id: int, file_id: str, busid: int, dest: Path, attempts: int) -> None:
+    """拉取直链并落盘，对瞬时失败（网络抖动 / OneBot 超时 / 空结果）做有界指数退避重试。
+
+    file_id 失效属于永久错误（直链拿不到且提示「已失效」），不重试，直接抛出以省时间。
+    """
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            url = qq.fetch_url(group_id, file_id, busid)
+            if not url:
+                raise RuntimeError("获取直链失败（file_id 可能已失效，请重新刷新来源）")
+            qq.download_to(url, dest)
+            if not dest.is_file() or dest.stat().st_size == 0:
+                raise RuntimeError("下载结果为空")
+            return
+        except Exception as e:
+            last = e
+            if "已失效" in str(e):
+                raise  # 永久错误，不再重试
+            if attempt < attempts:
+                time.sleep(min(0.5 * 2 ** (attempt - 1), 3.0))  # 0.5s, 1s, 2s ... 上限 3s
+                continue
+    raise last
+
+
 def _process_one(x: dict) -> tuple:
     """处理单条下载入库；原地修改 x（仅本条目，不影响其它线程），返回 (result, changed, x)。
 
@@ -56,12 +82,8 @@ def _process_one(x: dict) -> tuple:
         asset_rel = vault.asset_rel(x)
         dest = config.vault() / asset_rel
         if not dest.is_file():
-            url = qq.fetch_url(int(x.get("group_id") or 0), x["file_id"], int(x.get("busid") or 102))
-            if not url:
-                raise RuntimeError("获取直链失败（file_id 可能已失效，请重新刷新来源）")
-            qq.download_to(url, dest)
-            if not dest.is_file() or dest.stat().st_size == 0:
-                raise RuntimeError("下载结果为空")
+            attempts = max(1, int(os.environ.get("RM_DOWNLOAD_RETRIES", "3")))
+            _fetch_with_retry(int(x.get("group_id") or 0), x["file_id"], int(x.get("busid") or 102), dest, attempts)
         body, status = extract.extract(dest, int(config.CFG.get("max_chars_per_file", 60000)))
         index.body_path(x["id"]).write_text(body, encoding="utf-8")
         x.update({
