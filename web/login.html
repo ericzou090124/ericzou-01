@@ -102,6 +102,27 @@ async function post(path, body = {}) {
   return r.json();
 }
 
+function showFallback() {
+  $('#qrframe').innerHTML = '<div class="placeholder">登录已成功，但本地服务暂时无法访问。<br>'
+    + '请确认「资源管理」服务窗口仍在运行，然后 <a href="/" target="_self">点此打开资源管理器</a><br>'
+    + '或重新双击 start.bat / install.bat 启动服务。</div>';
+  banner('登录成功，但跳转失败：本地服务未响应。请确认服务窗口在运行后点上方链接。', 'warn');
+}
+
+async function goHome() {
+  // 跳转前先确认服务可达，避免「页面加载失败 / ERR_CONNECTION_REFUSED」
+  let tries = 0;
+  const attempt = () => {
+    fetch('/api/health', {cache: 'no-store'})
+      .then(() => { location.href = '/'; })
+      .catch(() => {
+        if (tries++ < 25) setTimeout(attempt, 800);
+        else showFallback();
+      });
+  };
+  attempt();
+}
+
 async function restore() {
   if (restoring || done) return;
   restoring = true;
@@ -111,10 +132,10 @@ async function restore() {
     const r = await post('/api/qqlogin/restore');
     if (r.ok && r.mode === 'live') {
       done = true;
-      banner('已恢复在线：' + (r.items || 0) + ' 条群文件元数据已刷新，下载已解锁。3 秒后自动返回资源管理器。', 'ok');
+      banner('已恢复在线：' + (r.items || 0) + ' 条群文件元数据已刷新，下载已解锁。即将返回资源管理器…', 'ok');
       pill('#p-phase', '登录完成', 'ok');
       pill('#p-onebot', '群文件接口 在线', 'ok');
-      setTimeout(() => { location.href = '/'; }, 3000);
+      setTimeout(goHome, 1500);
       return;
     }
     banner('QQ 已登录，但群文件接口暂未就绪：' + (r.error || '请稍后再点一次「刷新来源」'), 'warn');

@@ -3,6 +3,24 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v1.2.3] - 2026-11-07
+
+修复「install.bat 双击后命令行闪退」与「扫码登录后页面加载失败（ERR_CONNECTION_REFUSED）」两个新手高频卡点，并补齐若干易崩环节。
+
+### 修复
+
+- **点击 install.bat / start.bat 弹出命令行后直接闪退**：根因是纯 Python 助手在非交互环境下 `input()` 抛出 `EOFError` 没有任何兜底，加上 `.bat` 没有 `pause`，异常一冒出来窗口就关了。给所有 `input()` 调用包上 `safe_input()`（捕获 `EOFError`/`KeyboardInterrupt` 返回默认值），并在 `.bat` 末尾加 `pause` 与退出码提示，再也不会“闪一下就没”。
+- **扫码成功跳转主界面时页面加载失败**：根因是本地服务只是启动器（install/start.bat）的子进程，用户关掉启动窗口、或启动窗口因异常退出，服务跟着一起死，页面 `/` 请求 8787 端口时已是 `ERR_CONNECTION_REFUSED`。改为**服务以独立控制台窗口（Windows `CREATE_NEW_CONSOLE`）运行**——关闭启动器窗口不影响服务；新增共用模块 `tools/launcher.py` 统一负责「探活 / 端口检测 / 独立窗口拉起」。
+- **登录页跳转前先确认服务可达**：`web/login.html` 的 `goHome()` 在跳转 `/` 前先 `fetch('/api/health')`，最多重试 25 次（约 20 秒）；仍不可达时显示「点此打开资源管理器」的可点链接与明确提示，而不是硬跳到一个死页。
+- **`find_root()` 全盘遍历卡死**：原实现用 `os.walk` 从分区根递归，在部分机器上会长时间无响应。改为**只向上爬祖先目录、最多 5 层**定位 `server.py`，找不到时给友好中文提示（「请先解压整个文件夹再运行」），不再遍历整盘。
+- **`.bat` 健壮性收尾**：`install.bat`/`start.bat`/`一键登录.bat`/`tools/start_napcat.bat` 全部为纯 ASCII 启动器，`python` 缺失自动回退 `py`，找不到 `server.py` 时由 Python 助手优雅提示而非抛 traceback；新增 `tools/stop.bat` 一键停止 8787 服务。
+- **所有命令行工具（`open_login.py`/`napcat_ctl.py`）加 `if __name__=='__main__': try/except` 兜底**，任何异常都打印可截图信息并 `input` 暂停，不再闪退。
+
+### 新增
+
+- `tools/launcher.py`：统一的本地服务启动/探活模块（被 install/start 共用），服务以独立窗口运行。
+- `tools/stop.bat`：双击即停止 8787 本地服务。
+
 ## [v1.2.2] - 2026-11-07
 
 修复登录页「无法连接 NapCat WebUI」相关的一连串问题，并补齐自测发现的其它易错环节。

@@ -2,9 +2,12 @@
 setlocal
 set "PY=python"
 where python >nul 2>nul || set "PY=py"
+echo Starting NapCat (QQ bot gateway)...
+echo After it starts, wait ~10-40s, then go back to Resource Manager and click "refresh source".
 "%PY%" "%~dp0napcat_ctl.py" start
 echo.
-echo 若窗口闪退且仍提示未连接，请手动打开浏览器访问：
+if errorlevel 1 ( echo [NapCat failed to start - see error above] )
+echo If the page still says not connected, open in browser:
 echo   http://127.0.0.1:6099/webui
-echo 在控制台里登录 QQ 后，回到资源管理器点「刷新来源」即可。
+echo Log in to QQ there, then back in Resource Manager click "refresh source".
 pause

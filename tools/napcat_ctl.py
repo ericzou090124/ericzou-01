@@ -29,4 +29,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as e:
+        print("[错误] " + type(e).__name__ + ": " + str(e))
+        import traceback
+        traceback.print_exc()
+        try:
+            input("按回车退出…")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        raise SystemExit(1)

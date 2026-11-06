@@ -60,4 +60,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("")
+        print("[一键登录出错] " + type(e).__name__ + ": " + str(e))
+        import traceback
+        traceback.print_exc()
+        print("")
+        print("请确认本地服务已启动（双击 start.bat 或 install.bat），再重试。")
+        try:
+            input("按回车退出…")
+        except (EOFError, KeyboardInterrupt):
+            pass
+        sys.exit(1)
