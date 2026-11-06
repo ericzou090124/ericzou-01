@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 set "PY=python"
 %PY% --version >nul 2>&1 || set "PY=py"
 %PY% --version >nul 2>&1 || (

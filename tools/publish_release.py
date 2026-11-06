@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""一键发布 GitHub Release 并上传附件 zip。
+"""一键发布 GitHub Release 并上传自解压安装器 resource-manager-installer.bat。
 
 前置条件（只需一次）：
   - 本机已用 GitHub 凭证登录过（Git Credential Manager 已缓存 token）。
@@ -9,9 +9,9 @@
 用法：
   python tools/publish_release.py
 可选参数：
-  --tag v1.2.3           指定要发布的标签（默认取最新 tag）
-  --zip 路径/xxx.zip      指定附件（默认按 <标签>.zip 在仓库外层/仓库内查找）
-  --repo owner/name       覆盖目标仓库（默认取当前 git remote origin）
+  --tag v1.2.3                 指定要发布的标签（默认取最新 tag）
+  --asset 路径/installer.bat    指定安装器（默认按 resource-manager-installer.bat 在仓库外层查找）
+  --repo owner/name             覆盖目标仓库（默认取当前 git remote origin）
 """
 from __future__ import annotations
 
@@ -49,25 +49,25 @@ def latest_tag() -> str:
     return t
 
 
-def find_zip(tag: str, explicit: str | None) -> str:
+def find_asset(tag: str, explicit: str | None) -> str:
     if explicit:
         if not os.path.isfile(explicit):
-            raise SystemExit(f"[错误] 指定 zip 不存在：{explicit}")
-        return explicit
-    here = os.path.dirname(os.path.abspath(__file__))
+            raise SystemExit(f"[错误] 指定安装器不存在：{explicit}")
+        return os.path.abspath(explicit)
+    here = os.path.dirname(os.path.abspath(__file__))  # tools/
     candidates = [
-        os.path.join(here, "..", f"resource-manager-{tag}.zip"),
-        os.path.join(here, f"resource-manager-{tag}.zip"),
-        os.path.join(here, "..", "..", f"resource-manager-{tag}.zip"),
-        os.path.join(here, f"{tag}.zip"),
+        os.path.join(here, "..", "..", "resource-manager-installer.bat"),  # 工作区外层
+        os.path.join(here, "..", "resource-manager-installer.bat"),
+        os.path.join(here, "resource-manager-installer.bat"),
+        os.path.join(here, "..", "..", f"resource-manager-{tag}.zip"),  # 兼容旧 zip
     ]
     for c in candidates:
         if os.path.isfile(c):
             return os.path.abspath(c)
     raise SystemExit(
-        f"[错误] 没找到 {tag} 的 zip 附件。请先构建：\n"
-        f"  git archive --format=zip --output=resource-manager-{tag}.zip HEAD\n"
-        f"或加 --zip 指定路径。"
+        f"[错误] 没找到 resource-manager-installer.bat。请先运行：\n"
+        f"  python tools/build_installer.py\n"
+        f"它会在仓库外层生成 resource-manager-installer.bat。"
     )
 
 
@@ -113,14 +113,14 @@ def api(method: str, url: str, token: str, data=None, headers=None, binary=None)
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default=None)
-    ap.add_argument("--zip", default=None)
+    ap.add_argument("--asset", default=None)
     ap.add_argument("--repo", default=None)
     args = ap.parse_args()
 
     tag = args.tag or latest_tag()
     repo = args.repo or repo_from_remote()
-    zip_path = find_zip(tag, args.zip)
-    print(f"[信息] 仓库={repo}  标签={tag}  附件={zip_path}")
+    asset_path = find_asset(tag, args.asset)
+    print(f"[信息] 仓库={repo}  标签={tag}  附件={asset_path}")
 
     # 重复发布同一版本时，把本地 tag 同步到最新提交并推送（个人仓库 force-push tag 安全）
     try:
@@ -142,12 +142,13 @@ def main():
             f"## {tag}\n\n"
             "面向零配置新手的 QQ 群文件 → Obsidian 知识库闭环。\n\n"
             "### 主要修复\n"
+            "- **自解压安装器**：下载 `resource-manager-installer.bat` 后**直接双击即可**，无论你是在压缩包里双击还是先解压，它都会自动解压到用户目录并启动，无需任何手动解压步骤。\n"
             "- 修复 install.bat / start.bat 双击后命令行闪退（input/EOF 兜底 + .bat pause）。\n"
             "- 修复扫码登录后主界面「页面加载失败」：服务改为独立控制台窗口运行，关闭启动器不影响服务。\n"
             "- 登录页跳转前先探活 /api/health，失败给出可点链接而非死页。\n"
             "- 修复 /api/qqlogin/restore 在 NapCat 未运行时卡住 20+ 秒（新增端口探活，未运行立即提示）。\n\n"
             "### 使用\n"
-            "解压 zip 到任意文件夹 → 双击 install.bat → 打开 http://127.0.0.1:8787 按向导扫码登录。"
+            "下载 `resource-manager-installer.bat` → **双击它** → 自动安装并打开 http://127.0.0.1:8787 按向导扫码登录。"
         ),
         "draft": False,
         "prerelease": False,
@@ -177,24 +178,24 @@ def main():
 
     # 若该 Release 已存在同名附件（重复发布同一版本），先删旧再传新，避免重复附件
     if rel_id:
-        name = os.path.basename(zip_path)
+        name = os.path.basename(asset_path)
         try:
             r = api("GET", f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets", token)
             for a in json.loads(r.read().decode("utf-8")):
                 if a.get("name") == name:
                     api("DELETE", f"https://api.github.com/repos/{repo}/releases/assets/{a['id']}", token)
-                    print(f"[信息] 已删除旧附件 {name}，准备替换为新构建的 zip")
+                    print(f"[信息] 已删除旧附件 {name}，准备替换为新构建的安装器")
         except Exception as e:
             print(f"[警告] 清理旧附件失败（可忽略，继续上传）：{e}")
 
     # 2) 上传附件
-    name = os.path.basename(zip_path)
-    with open(zip_path, "rb") as f:
+    name = os.path.basename(asset_path)
+    with open(asset_path, "rb") as f:
         bin_data = f.read()
     up = f"{upload_url}?name={name}"
+    ctype = "application/octet-stream" if name.endswith(".bat") else "application/zip"
     try:
-        api("POST", up, token, data=bin_data,
-            headers={"Content-Type": "application/zip"})
+        api("POST", up, token, data=bin_data, headers={"Content-Type": ctype})
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
         raise SystemExit(f"[错误] 上传附件失败（{e.code}）：{detail}")

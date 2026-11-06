@@ -22,6 +22,7 @@
 
 - `tools/launcher.py`：统一的本地服务启动/探活模块（被 install/start 共用），服务以独立窗口运行。
 - `tools/stop.bat`：双击即停止 8787 本地服务。
+- **自解压安装器 `resource-manager-installer.bat`（根治“解压后才能用”的手动操作痛点）**：`tools/build_installer.py` 把整个程序（git archive，自动排除发布脚本）以 base64 内嵌进一个纯 ASCII 的 `.bat`。用户**直接双击它即可**——无论在压缩包预览里双击、还是先解压再双击，它都会自动解压到 `C:\Users\<你>\resource-manager`、检查 Python、装好可选增强、启动服务、打开浏览器，**全程无需手动解压**。中文提示通过 base64(UTF-16LE) 内嵌、PowerShell 解码弹窗，彻底摆脱 GBK/UTF-8 代码页乱码。GitHub Release 主附件改为该安装器。
 
 ## [v1.2.2] - 2026-11-07
 

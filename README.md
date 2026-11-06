@@ -1,6 +1,7 @@
 # 资源管理 · QQ 群文件 → Obsidian 可视化知识库闭环
 
 > 🚀 **第一次用？3 步上手（不用懂原理）**
+> 0. 从 GitHub Release 下载 **`resource-manager-installer.bat`**，**直接双击它**即可（自动解压+安装+启动，不用手动解压）；
 > 1. 双击 `install.bat`（Windows）/ 运行 `bash install.sh`（Mac·Linux）装依赖并启动；
 > 2. 浏览器打开 `http://127.0.0.1:8787`，按弹出的 **「2 步配置向导」** 装好 NapCat 并用手机 QQ 扫码登录、勾选你要管理的群；
 > 3. 开始浏览 / 预览 / 下载（下载前都会让你确认）。
