@@ -124,6 +124,13 @@ resource-manager/                      本仓库（程序）
 
 ## 文档
 
+- **验收入口 / 存档说明**：[docs/RELEASE.md](docs/RELEASE.md)（含逐项验收清单）
 - 设计（交付顺序第 1 步）：[docs/DESIGN.md](docs/DESIGN.md)
 - 技术实现路线：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 本地试运行结果与问题：[docs/VERIFICATION.md](docs/VERIFICATION.md)
+- GitHub 仓库与提交约定：[docs/PUSH.md](docs/PUSH.md)
+
+## 仓库
+
+`https://github.com/ericzou090124/ericzou-01.git` · 分支 `main` · 存档标签 `v1.0.0`。
+后续改动直接提交并推送到该仓库；`state/`（元数据、正文、密钥）与下载资料一律不入库。

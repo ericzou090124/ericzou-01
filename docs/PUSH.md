@@ -1,54 +1,47 @@
-# 推送到 GitHub
+# GitHub 仓库与提交约定
 
-## 当前状态
+## 当前状态（2026-11-06 已验证）
 
-- 本机 `git` 可用（2.55.0），`user.name=ericzou090124`、`user.email=ericzou375@gmail.com`。
-- 网络可达：`git ls-remote https://github.com/octocat/Hello-World.git HEAD` 成功。
-- **缺少认证**：没有 `gh` CLI、`~/.git-credentials`、`~/.ssh` 密钥，Windows 凭据管理器里也没有 GitHub 条目；`credential.helper` 未配置。
-- 因此**助手不能代替你完成推送**，否则就是伪造凭证或把令牌写进仓库。项目已在本地完成 `git init` + 首次提交，推送只差「仓库地址 + 认证」这两个由你提供的信息。
+| 项 | 值 |
+| --- | --- |
+| 仓库 | `https://github.com/ericzou090124/ericzou-01.git` |
+| 本地 remote | `origin` 已设置，分支 `main` 跟踪 `origin/main` |
+| 首次提交 | `52d728a feat: 资源管理器闭环 - QQ 群文件可视化导入、Obsidian 多级大纲与 grounded AI 检索` |
+| 推送结果 | ✅ `git push -u origin main` 成功（本机 git 凭据可用） |
+| 存档标签 | `v1.0.0`（注附标签，随仓库一起推送） |
 
-## 三种可行方式
+## 后续改动约定
 
-### A. 用 GitHub Desktop（最省事，推荐）
+用户要求「以后有改动直接在仓库里帮我改就行」：
 
-1. 打开 GitHub Desktop 并登录你的账号。
-2. `File → Add Local Repository`，选择 `resource-manager/` 目录（已有 `.git`）。
-3. `Publish repository`（新建仓库）或在 `Repository → Repository Settings → Remote` 填入已有仓库地址，然后 `Push origin`。
+1. 后续所有代码 / 文档改动都在 `resource-manager/` 工作区完成。
+2. 改动完成后直接 `git add -A && git commit -m "<类型>: <说明>" && git push origin main`。
+3. 提交信息用 `feat / fix / docs / refactor / test / chore` 前缀，中文简述。
+4. 重要里程碑打注附标签（`git tag -a vX.Y.Z -m "..."; git push origin vX.Y.Z`）。
+5. **不要提交** `state/`（元数据、正文、密钥）、任何下载下来的群资料、任何令牌。
 
-### B. 提供仓库地址，用本机的 git 凭据推送
-
-```bat
-tools\push_to_github.bat https://github.com/<你的账号>/<仓库名>.git
-```
-
-脚本只设置 remote 并 `git push -u origin main`，**不接收、不保存令牌**。认证由你本机的 GitHub Desktop / Windows 凭据管理器 / `gh auth login` 提供。
-
-### C. 一次性 PAT（不要写进任何会被提交的文件）
+## 常用命令
 
 ```bash
-git -C resource-manager remote add origin https://github.com/<账号>/<仓库>.git
-git -C resource-manager push -u origin main
+git -C resource-manager status
+git -C resource-manager log --oneline -5
+git -C resource-manager remote -v
+git -C resource-manager push origin main
 ```
 
-在弹出的凭据窗口里填用户名 + Personal Access Token；或让凭据管理器记住。
-**不要把 PAT 粘贴给助手、不要写进 `config.json` / `.bat` / 文档。**
+若换机器后缺少认证，用 GitHub Desktop 登录，或配置 `gh auth login` / PAT；
+**不要把令牌写进 `config.json`、`.bat`、文档或提交信息**。
 
 ## 仓库里有什么 / 没有什么
 
 提交内容：`config.json`、`server.py`、`lib/`、`web/`、`obsidian_plugin/`、`tools/`、`docs/`、`start.bat`、`README.md`、`.gitignore`。
 
-被 `.gitignore` 排除（**不会上传**）：
+被 `.gitignore` 排除（**不上传**）：`state/catalog.json`（1625 条群文件元数据）、`state/index.db`、`state/bodies/`（已下载文件正文）、`state/secrets.json`（外部 API Key）、`state/qq_manifest.json`、`state/settings.json`、`__pycache__/`。
 
-- `state/catalog.json`（1625 条群文件元数据）、`state/index.db`、`state/bodies/`（已下载文件正文）
-- `state/secrets.json`（外部 API Key）
-- `state/qq_manifest.json`、`state/settings.json`、`__pycache__/`
+即：**群里下载的资料、正文、密钥都不进 GitHub**。克隆后需要本机 NapCat，或自备清单运行 `python tools/bootstrap.py` 才能重建目录与索引。
 
-也就是说：**群里下载的资料、正文、密钥都不进 GitHub**。克隆后需要本机 NapCat 或自备清单重新 `bootstrap.py` 才能生成目录与索引。
-
-## 推送前自检
+推送前自检：
 
 ```bash
-git -C resource-manager status
-git -C resource-manager log --oneline -3
-git -C resource-manager ls-files | grep -E "state/|secrets"   # 应无输出
+git -C resource-manager ls-files | grep -E "state/|secrets|catalog.json|index.db"   # 应无输出
 ```
