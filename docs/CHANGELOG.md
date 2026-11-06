@@ -15,6 +15,7 @@
 - **`find_root()` 全盘遍历卡死**：原实现用 `os.walk` 从分区根递归，在部分机器上会长时间无响应。改为**只向上爬祖先目录、最多 5 层**定位 `server.py`，找不到时给友好中文提示（「请先解压整个文件夹再运行」），不再遍历整盘。
 - **`.bat` 健壮性收尾**：`install.bat`/`start.bat`/`一键登录.bat`/`tools/start_napcat.bat` 全部为纯 ASCII 启动器，`python` 缺失自动回退 `py`，找不到 `server.py` 时由 Python 助手优雅提示而非抛 traceback；新增 `tools/stop.bat` 一键停止 8787 服务。
 - **所有命令行工具（`open_login.py`/`napcat_ctl.py`）加 `if __name__=='__main__': try/except` 兜底**，任何异常都打印可截图信息并 `input` 暂停，不再闪退。
+- **自测发现并修复：`/api/qqlogin/restore` 在 NapCat 未运行时卡住 20+ 秒**：原实现无条件轮询 `qq.online()` 并 `sleep(1.5)×14`，即使 OneBot 端口根本没监听也会空等 21 秒，页面看起来像卡死。新增 `lib/qq.reachable()` 端口探活，NapCat 没运行时立即返回「请先启动 NapCat」的可操作提示；已运行但未就绪时最多等约 8 秒。
 
 ### 新增
 

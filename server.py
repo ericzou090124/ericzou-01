@@ -223,12 +223,18 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
             if p == "/api/qqlogin/restore":
-                # 扫码确认后 OneBot 3000 通常要几秒才起来，等就绪再刷新来源，
-                # 这样用户不必回到主界面手动点「刷新来源」。
-                for _ in range(14):
+                # 先快速判断 NapCat/OneBot 是否可达：完全没运行时立即给出可操作提示，
+                # 避免轮询 20+ 秒让页面像卡死（这是 v1.2.3 自测发现的真实卡顿）。
+                if not qq.reachable() and not qq.online():
+                    return self._send({"ok": False, "need_start": True,
+                                       "error": "NapCat 未运行：请先点页面上的「启动 NapCat」按钮，"
+                                                "或打开 http://127.0.0.1:6099/webui 登录 QQ 后再试。"
+                                                "（也可用 tools/start_napcat.bat 手动拉起）"})
+                # 已扫码但 OneBot 3000 一般要几秒才起来：最多等约 8 秒，失败再提示手动刷新
+                for _ in range(6):
                     if qq.online():
                         break
-                    time.sleep(1.5)
+                    time.sleep(1.2)
                 if not qq.online():
                     return self._send({"ok": False,
                                        "error": "扫码登录尚未完成或群文件接口（OneBot 3000）还没起来："

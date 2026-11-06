@@ -67,6 +67,25 @@ def online() -> bool:
         return False
 
 
+def reachable() -> bool:
+    """NapCat OneBot HTTP 端口是否可达（只探活端口，不等登录态）。
+
+    用于「未运行」与「已运行但未登录」的快速区分：完全没运行时立即返回 False，
+    避免上层轮询空等十几秒让页面像卡死。
+    """
+    import socket
+    try:
+        host = BASE.split("://", 1)[-1].split(":")[0]
+        port = int(BASE.split(":")[-1])
+    except Exception:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            return True
+    except Exception:
+        return False
+
+
 def _safe(name: str) -> str:
     return (name or "unnamed").replace("/", "_").replace("\\", "_").strip()
 
