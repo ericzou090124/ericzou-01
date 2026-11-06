@@ -19,8 +19,11 @@ async function loadState() {
   state.counts = d.counts; state.source = d.source;
   const on = d.source.mode === 'live';
   const offlineNote = (!on && (d.source.errors || []).length)
-    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}</div>`
+    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}<br>不用桌面图片：点右上角「QQ 登录」，网页里扫码即可自动恢复。</div>`
     : '';
+  const loginBtn = $('#btn-login');
+  loginBtn.className = on ? 'btn' : 'btn warn';
+  loginBtn.title = on ? 'QQ 已在线，可打开登录页查看状态' : 'QQ 登录态失效，打开网页扫码登录';
   $('#sources').innerHTML = `
     <div class="src"><span>QQ 群文件</span><span class="badge ${on ? '' : 'warn'}">${on ? '在线' : (d.source.mode === 'snapshot' ? '离线快照' : '未连接')}</span></div>
     <div class="src"><span>微信</span><span class="badge off">未接入</span></div>
@@ -210,6 +213,7 @@ function settingsModal() {
   });
 }
 
+$('#btn-login').onclick = () => window.open('/login', '_blank');
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';
   try { const r = await api('/api/refresh', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});

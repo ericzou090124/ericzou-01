@@ -8,13 +8,14 @@ import json
 import mimetypes
 import re
 import sys
+import time
 import urllib.parse
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ai, catalog, config, download, index, llm, qq, vault, wechat  # noqa: E402
+from lib import ai, catalog, config, download, index, llm, qq, qqlogin, vault, wechat  # noqa: E402
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -129,11 +130,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if p in ("/", "/index.html"):
                 return self._file("index.html")
+            if p == "/login":
+                return self._file("login.html")
             if p in ("/app.js", "/style.css"):
                 return self._file(p.lstrip("/"))
+            if p == "/api/qqlogin/status":
+                return self._send(qqlogin.status())
             if p == "/api/health":
+                # _sync_source() 已在请求开头实时探活；这里用状态缓存，
+                # 避免 QQ 离线时每次健康检查都白等一次 OneBot 超时。
                 return self._send({"ok": True, "docs": index.count(), "mode": SOURCE_STATUS.get("mode"),
-                                   "qq_online": qq.online(), "vault": str(config.vault())})
+                                   "qq_online": bool(SOURCE_STATUS.get("qq_online", False)),
+                                   "vault": str(config.vault())})
             if p == "/api/state":
                 cat = ensure()
                 return self._send({"ok": True, "source": SOURCE_STATUS, "counts": catalog.counts(cat),
@@ -188,6 +196,25 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if p == "/api/refresh":
                 return self._send(refresh(bool(body.get("snapshot"))))
+            if p == "/api/qqlogin/refresh":
+                return self._send(qqlogin.refresh_qrcode())
+            if p == "/api/qqlogin/quick":
+                return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
+            if p == "/api/qqlogin/restore":
+                # 扫码确认后 OneBot 3000 通常要几秒才起来，等就绪再刷新来源，
+                # 这样用户不必回到主界面手动点「刷新来源」。
+                for _ in range(14):
+                    if qq.online():
+                        break
+                    time.sleep(1.5)
+                if not qq.online():
+                    return self._send({"ok": False,
+                                       "error": "扫码登录尚未完成或群文件接口（OneBot 3000）还没起来："
+                                                "请先在页面上用手机 QQ 扫码并确认；已确认的话稍等几秒，"
+                                                "或回主界面点「刷新来源」"})
+                r = refresh()
+                return self._send({"ok": bool(r.get("ok")), "mode": r.get("mode"),
+                                   "items": r.get("items"), "error": r.get("error") or ""})
             if p == "/api/download":
                 cat = ensure()
                 if SOURCE_STATUS.get("mode") == "snapshot":
