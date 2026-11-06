@@ -3,6 +3,18 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.3.0] - 2026-11-07
+
+问答检索退化路径 bug 修复（持续迭代第 10 轮）。
+
+### 修复（正确性 bug）
+- **FTS 未命中时的退化路径误报「未找到」**：`ai.answer()` 在 FTS 无命中、但关键词命中池内有结果时，原代码重建的 `hits_pool` 只带了 `item_id` 与空 `body`，丢弃了 `title`/`meta`；导致后续 `corpus` 为空、`valid2` 恒空，最终即使确有命中也返回「授权可见的资料中没有检索到相关信息」。现已为退化命中补全 `title`/`meta`（取自 `_hay(x)`），corpus/valid2 正常，命中可正确返回。
+- 清理 `ai.py` 中未使用的死代码 `by_id`（命中后从未被引用）。
+
+### 测试加固（防止回归与副作用）
+- `tools/smoke_test.py` 新增 `[10]`：monkeypatch `index.search` 模拟 FTS 全 miss 但 `query_terms` 含真实存在的词（「复变」），断言 `ai.answer(fast=True)` 仍 `found=True`，锁住本次修复。
+- **修复测试副作用**：`[9]` 下载测试原本会因 `download.run` 成功而调用 `catalog.save` 把 2 条假目录写回真实 `state/catalog.json`，已通过 patch `catalog.save` 为 no-op 杜绝；并补回此前被该副作用污染的 `catalog.json`（从 `qq_manifest.json` 快照重建 1625 条，仅 1 个遗留 body 被重新标记为已下载）。
+
 ## [v2.2.0] - 2026-11-07
 
 下载流水线性能修复与并发入库（持续迭代第 9 轮）。

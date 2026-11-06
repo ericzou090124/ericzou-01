@@ -129,8 +129,9 @@ def main():
         def rebuild(c): _calls["rebuild"] += 1; return 1
         @staticmethod
         def sync(c): _calls["sync"] += 1; return 1
-    _orig = (_dl.qq, _dl.vault, _dl.extract, _dl.index)
+    _orig = (_dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save)
     _dl.qq, _dl.vault, _dl.extract, _dl.index = _FakeQQ(), _FakeVault(), _FakeExtract(), _FakeIndex()
+    _dl.catalog.save = lambda c: None  # 关键：禁止测试把 2 条假目录写回真实 catalog.json
     _dcat = {"version": 1, "items": [
         {"id": "r-t1", "source": "QQ群", "group": "g", "path": "a.pdf", "name": "a.pdf",
          "ext": ".pdf", "group_id": 123, "file_id": "f1", "busid": 102, "size_bytes": 10, "downloaded": False},
@@ -141,7 +142,7 @@ def main():
     try:
         _r = _dl.run(_dcat, ["r-t1", "r-t2"], confirm=True)
     finally:
-        _dl.qq, _dl.vault, _dl.extract, _dl.index = _orig
+        _dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save = _orig
         config.vault = _orig_vault
         os.environ.pop("RM_DOWNLOAD_WORKERS", None)
     if _r.get("succeeded") != 2:
@@ -151,6 +152,22 @@ def main():
     if not (_dcat["items"][0]["downloaded"] and _dcat["items"][1]["downloaded"]):
         fail("download.run 未就地标记条目为已下载")
     print(f"[9] download.run 用 sync(非rebuild) 且并行路径成功 2 条，索引调用 {_calls}")
+
+    # ai.answer 退化路径（FTS 未命中但词命中）必须正确命中，不能误报未找到
+    from lib import ai as _ai
+    _o_srch, _o_qt, _o_cnt = _ai.index.search, _ai.index.query_terms, _ai.index.count
+    _ai.index.search = lambda *a, **k: []          # 模拟 FTS 完全 miss
+    _ai.index.query_terms = lambda q, max_terms=24: ["复变"]  # 命中词在真实 catalog 中存在
+    _ai.index.count = lambda: total
+    try:
+        _ra = _ai.answer("复变函数", cat, fast=True)
+    finally:
+        _ai.index.search, _ai.index.query_terms, _ai.index.count = _o_srch, _o_qt, _o_cnt
+    if not _ra.get("found"):
+        fail(f"ai.answer 退化路径误报未找到（修复前 corpus 为空 valid2 恒空）：{_ra}")
+    if _ra.get("mode") not in ("fast", "llm", "local"):
+        fail(f"ai.answer 退化路径 mode 异常：{_ra}")
+    print(f"[10] ai.answer 退化路径(FTS miss) 仍命中 found={_ra.get('found')} mode={_ra.get('mode')}")
 
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:

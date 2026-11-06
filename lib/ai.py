@@ -196,9 +196,11 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
             if sc > 0:
                 scored.append((sc, x, ""))
         scored.sort(key=lambda t: -t[0])
-        hits_pool = [{"item_id": x["id"], "body": ""} for _, x, _ in scored[:24]]
+        # 退化路径：FTS 未命中但词命中有结果时，hits 必须带上 title/meta，
+        # 否则后续 corpus 为空、valid2 恒空，会「明明有命中却报未找到」（真实回退 bug）。
+        hits_pool = [{"item_id": x["id"], "title": x.get("name", ""),
+                      "meta": _hay(x), "body": ""} for _, x, _ in scored[:24]]
 
-    by_id = {h["item_id"]: h for h in hits_pool}
     corpus = " ".join((h.get("title", "") + " " + h.get("meta", "") + " " + h.get("body", ""))
                       for h in hits_pool).lower()
     valid2 = [t for t in valid if t.lower() in corpus]

@@ -244,3 +244,19 @@
 **结论**：下载链路与刷新/采集一致地走「增量同步」，全系统不再有隐藏的全量重建热点。
 
 **下一步**：v2.3.0 探索——配置校验器（启动校验 config.json 必填项并给出可读报错）、或 Obsidian 插件增强（笔记内直接触发检索）、或下载失败重试/断点续传。
+
+---
+
+## 迭代 v2.3.0 — 问答退化路径 bug 修复（第 10 轮）
+
+目标：修掉 ai.answer 在 FTS 未命中时的错误「未找到」。
+
+**Bug**：`ai.answer` 在 FTS 无命中、但关键词命中池内有结果时，退化分支重建 `hits_pool` 只带 `item_id` 与空 `body`，丢弃 `title/meta` → `corpus` 空 → `valid2` 恒空 → 误报「未找到」。修复：退化命中补全 `title`（x["name"]）与 `meta`（_hay(x)）。同时删除从未被引用的死代码 `by_id`。
+
+**自测**：smoke_test 新增 `[10]`：mock `index.search` 返回 []、`query_terms` 返回真实存在的词「复变」，断言 `ai.answer(fast=True)` 仍 `found=True`。通过。
+
+**严重副作用（已补救）**：上一轮的 `[9]` 下载测试在 `download.run` 成功后调用了真实的 `catalog.save`，把 2 条假目录**覆盖写回真实 `state/catalog.json`**（1625 → 2 条），导致后续测试 `[2]` 报 2 条、且 `[10]` 走了错误的范围分支。补救：① patch `catalog.save` 为 no-op 杜绝再次发生；② 用 `server.refresh(force_snapshot=True)` 从 `qq_manifest.json`（1641 条）重建 catalog（去重后 1625 条），仅 1 个遗留 body（r-b623b3e0aa9485c2）被重新标记为已下载，索引 `rebuild` 复位。验证：恢复后 `[2]` 重新为 1625，全测试 ALL PASS。
+
+**教训**：自测里凡调用会落盘的 `save/rebuild`，必须 patch 成 no-op 或使用临时 state 目录，绝不能让 mock 测试污染真实数据文件。`state/` 已被 gitignore，无 git 兜底，污染只能靠快照重建。
+
+**下一步**：v2.4.0 可探索——配置校验器（启动校验 config.json 必填项并给可读报错）、Obsidian 插件侧边栏检索增强、或下载失败重试/断点续传。
