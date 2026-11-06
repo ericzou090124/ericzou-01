@@ -5,8 +5,10 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
 
 from . import config
@@ -19,31 +21,75 @@ STOP = re.compile(
     r"老用错|咋办|咋弄|分别|顺便|同时|以及)", re.I
 )
 
+# 线程级只读连接缓存：避免每次检索都新建/关闭 SQLite 连接（FTS 只读连接可按线程安全复用）。
+# 写操作（rebuild）使用 _new_connection() 独立连接并在末尾关闭，不污染读缓存。
+_CONN_LOCAL = threading.local()
+_COUNT_CACHE = {"value": None}
 
-def connect() -> sqlite3.Connection:
+_COLS = ("title, body, meta, item_id UNINDEXED, downloaded UNINDEXED, "
+         "note UNINDEXED, asset UNINDEXED")
+
+
+def _new_connection() -> sqlite3.Connection:
     db = config.state("index.db")
     con = sqlite3.connect(str(db))
-    cols = ("title, body, meta, item_id UNINDEXED, downloaded UNINDEXED, "
-            "note UNINDEXED, asset UNINDEXED")
     try:
-        con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({cols}, tokenize='trigram')")
+        con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS}, tokenize='trigram')")
     except sqlite3.OperationalError:
-        con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({cols})")
+        con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS})")
     return con
+
+
+def connect() -> sqlite3.Connection:
+    con = getattr(_CONN_LOCAL, "con", None)
+    if con is None:
+        con = _new_connection()
+        _CONN_LOCAL.con = con
+    return con
+
+
+# 可选中文分词（jieba）：显著提升检索词精度（"高等代数考试内容" → 高等代数/考试/内容，
+# 而非滑动 3-gram 的噪声）。未安装时回退到 trigram 逻辑，核心功能不受影响。
+_JIEBA = None
+
+
+def _jieba():
+    global _JIEBA
+    if _JIEBA is None:
+        if os.environ.get("RM_NO_JIEBA"):
+            _JIEBA = False
+        else:
+            try:
+                import jieba
+                try:
+                    jieba.setLogLevel(20)
+                except Exception:
+                    pass
+                _JIEBA = jieba
+            except Exception:
+                _JIEBA = False
+    return _JIEBA
 
 
 def query_terms(q: str, max_terms: int = 24) -> list[str]:
     cleaned = STOP.sub(" ", q or "")
-    terms = []
-    for seg in CJK.findall(cleaned):
-        if len(seg) >= 3:
-            terms.extend(seg[i:i + 3] for i in range(len(seg) - 2))
-        elif len(seg) >= 2:
-            terms.append(seg)
-    terms += [w.lower() for w in LATIN.findall(q or "")]
-    if not terms:
-        for seg in CJK.findall(q or ""):
-            terms.extend(seg[i:i + 3] for i in range(max(1, len(seg) - 2)))
+    if _jieba():
+        # 分词模式：用 jieba 切出有意义的词，过滤停用词与单字，再补 Latin 词
+        toks = _jieba().lcut(cleaned)
+        terms = [t for t in toks if t and len(t) >= 2 and not STOP.fullmatch(t)]
+        terms += [w.lower() for w in LATIN.findall(q or "")]
+    else:
+        # 回退模式：滑动 3-gram（保证 FTS5 trigram 能命中）
+        terms = []
+        for seg in CJK.findall(cleaned):
+            if len(seg) >= 3:
+                terms.extend(seg[i:i + 3] for i in range(len(seg) - 2))
+            elif len(seg) >= 2:
+                terms.append(seg)
+        terms += [w.lower() for w in LATIN.findall(q or "")]
+        if not terms:
+            for seg in CJK.findall(q or ""):
+                terms.extend(seg[i:i + 3] for i in range(max(1, len(seg) - 2)))
     seen, out = set(), []
     for t in terms:
         if t not in seen:
@@ -63,7 +109,8 @@ def body_path(item_id: str) -> Path:
 
 
 def rebuild(cat: dict) -> int:
-    con = connect()
+    _COUNT_CACHE["value"] = None
+    con = _new_connection()
     try:
         con.execute("DELETE FROM fts")
         n = 0
@@ -84,6 +131,7 @@ def rebuild(cat: dict) -> int:
             )
             n += 1
         con.commit()
+        _COUNT_CACHE["value"] = n
         return n
     finally:
         con.close()
@@ -121,8 +169,12 @@ def search(q: str, limit: int = 20) -> list[dict]:
 
 
 def count() -> int:
+    if _COUNT_CACHE["value"] is not None:
+        return _COUNT_CACHE["value"]
     con = connect()
     try:
-        return con.execute("SELECT count(*) FROM fts").fetchone()[0]
+        v = con.execute("SELECT count(*) FROM fts").fetchone()[0]
     finally:
-        con.close()
+        pass
+    _COUNT_CACHE["value"] = v
+    return v

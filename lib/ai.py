@@ -177,6 +177,7 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
                 "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": int((time.time() - t0) * 1000)}
 
     pool = _pool(cat, f)
+    haymap = {x["id"]: _hay(x).lower() for x in pool}  # 预计算一次，避免对每个候选重复拼接 9 字段
     if not pool:
         return {"answer": NOT_FOUND + f"。「{where}」范围内暂无授权可见资料，无法作答。",
                 "found": False, "sources": [], "mode": "none", "scope": f, "scanned": index.count(),
@@ -189,7 +190,7 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
     if not hits_pool:
         scored = []
         for x in pool:
-            hay = _hay(x).lower()
+            hay = haymap.get(x["id"], _hay(x).lower())
             sc = sum(1 for t in valid if t.lower() in hay) / max(1, len(valid))
             if sc > 0:
                 scored.append((sc, x, ""))
@@ -214,7 +215,7 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
         if not x:
             continue
         body = h.get("body", "") or ""
-        hay = _hay(x, body).lower()
+        hay = (haymap.get(x["id"], "") + " " + body).lower()
         sc = sum(1 for t in valid2 if t.lower() in hay) / max(1, len(valid2))
         scored.append((sc, x, body))
     scored.sort(key=lambda t: -t[0])

@@ -21,14 +21,33 @@ def make_id(source: str, group: str, path: str) -> str:
     return "r-" + hashlib.sha1(f"{source}|{group}|{path}".encode("utf-8")).hexdigest()[:16]
 
 
+_CACHE: dict[str, tuple] = {}  # path -> (mtime_ns, size, data)
+
+
 def load() -> dict:
-    return config.read_json(config.state("catalog.json"), {"version": 1, "updated_at": "", "items": []})
+    p = config.state("catalog.json")
+    try:
+        st = p.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        cached = _CACHE.get(str(p))
+        if cached and cached[0] == key:
+            return cached[1]
+    except OSError:
+        pass
+    data = config.read_json(p, {"version": 1, "updated_at": "", "items": []})
+    try:
+        st = p.stat()
+        _CACHE[str(p)] = ((st.st_mtime_ns, st.st_size), data)
+    except OSError:
+        pass
+    return data
 
 
 def save(cat: dict) -> None:
     cat["version"] = 1
     cat["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     config.write_json(config.state("catalog.json"), cat)
+    _CACHE.pop(str(config.state("catalog.json")), None)
 
 
 def items(cat: dict) -> list[dict]:
