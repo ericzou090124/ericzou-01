@@ -16,6 +16,7 @@
 - **`.bat` 健壮性收尾**：`install.bat`/`start.bat`/`一键登录.bat`/`tools/start_napcat.bat` 全部为纯 ASCII 启动器，`python` 缺失自动回退 `py`，找不到 `server.py` 时由 Python 助手优雅提示而非抛 traceback；新增 `tools/stop.bat` 一键停止 8787 服务。
 - **所有命令行工具（`open_login.py`/`napcat_ctl.py`）加 `if __name__=='__main__': try/except` 兜底**，任何异常都打印可截图信息并 `input` 暂停，不再闪退。
 - **自测发现并修复：`/api/qqlogin/restore` 在 NapCat 未运行时卡住 20+ 秒**：原实现无条件轮询 `qq.online()` 并 `sleep(1.5)×14`，即使 OneBot 端口根本没监听也会空等 21 秒，页面看起来像卡死。新增 `lib/qq.reachable()` 端口探活，NapCat 没运行时立即返回「请先启动 NapCat」的可操作提示；已运行但未就绪时最多等约 8 秒。
+- **二次热修（同版本 v1.2.3 重新发布）—「在压缩包里直接双击 .bat 报找不到 tools/ 文件」**：根因是用户在资源管理器里**直接打开 zip 并双击里面的 `install.bat`**，Windows 只会把那一个 `.bat` 抽到临时目录运行，不会带上 `tools/` 等文件，于是 Python 找不到 `install_helper.py` 报 `can't open file`。修复方式：`install.bat`/`start.bat`/`一键登录.bat` 改为**先稳健探测 helper 位置**（`tools\` 与同名文件），找不到时打印一眼就懂的英文指引（提示「先完整解压再运行」）并安全退出 `exit /b 2`，不再甩 Python 报错；同时移除会导致 cmd 解析错误（`此时不应有 .`）的 `..\` 路径候选与未转义括号。另新增 `新手必读.txt`（UTF-8 中文零配置上手指南），`.bat` 报错时指引用户阅读。各 helper 的 `find_root()` 也增加「向下一层兜底」以兼容解压时多套一层文件夹的情况。
 
 ### 新增
 

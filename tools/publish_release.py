@@ -122,6 +122,14 @@ def main():
     zip_path = find_zip(tag, args.zip)
     print(f"[信息] 仓库={repo}  标签={tag}  附件={zip_path}")
 
+    # 重复发布同一版本时，把本地 tag 同步到最新提交并推送（个人仓库 force-push tag 安全）
+    try:
+        run(f"git tag -f {tag}")
+        run(f"git push -f origin {tag}")
+        print(f"[信息] 已将标签 {tag} 更新并推送到最新提交")
+    except Exception as e:
+        print(f"[警告] 更新标签失败（可忽略，不影响发布）：{e}")
+
     token = get_token()
     print("[信息] 已取得 GitHub 凭证。")
 
@@ -165,6 +173,19 @@ def main():
     if not rel:
         raise SystemExit("[错误] 未能获取 Release 信息，发布终止。")
     upload_url = rel.get("upload_url", "").split("{", 1)[0]
+    rel_id = rel.get("id")
+
+    # 若该 Release 已存在同名附件（重复发布同一版本），先删旧再传新，避免重复附件
+    if rel_id:
+        name = os.path.basename(zip_path)
+        try:
+            r = api("GET", f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets", token)
+            for a in json.loads(r.read().decode("utf-8")):
+                if a.get("name") == name:
+                    api("DELETE", f"https://api.github.com/repos/{repo}/releases/assets/{a['id']}", token)
+                    print(f"[信息] 已删除旧附件 {name}，准备替换为新构建的 zip")
+        except Exception as e:
+            print(f"[警告] 清理旧附件失败（可忽略，继续上传）：{e}")
 
     # 2) 上传附件
     name = os.path.basename(zip_path)
