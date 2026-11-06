@@ -125,7 +125,7 @@ def main():
     token = get_token()
     print("[信息] 已取得 GitHub 凭证。")
 
-    # 1) 创建 Release
+    # 1) 创建 Release（幂等：若已存在则复用，不报错）
     rel_url = f"https://api.github.com/repos/{repo}/releases"
     payload = {
         "tag_name": tag,
@@ -144,14 +144,27 @@ def main():
         "draft": False,
         "prerelease": False,
     }
+    rel = None
     try:
         resp = api("POST", rel_url, token, data=payload)
         rel = json.loads(resp.read().decode("utf-8"))
+        print(f"[信息] Release 已创建：{rel.get('html_url')}")
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:300]
-        raise SystemExit(f"[错误] 创建 Release 失败（{e.code}）：{detail}")
+        if e.code == 422:
+            # 已存在同名 tag 的 Release，尝试取出复用
+            try:
+                r2 = api("GET", f"{rel_url}/tags/{tag}", token)
+                rel = json.loads(r2.read().decode("utf-8"))
+                print(f"[信息] 该标签的 Release 已存在，复用：{rel.get('html_url')}")
+            except Exception:
+                detail = e.read().decode("utf-8", "replace")[:300]
+                raise SystemExit(f"[错误] 创建 Release 失败（{e.code}）：{detail}")
+        else:
+            detail = e.read().decode("utf-8", "replace")[:300]
+            raise SystemExit(f"[错误] 创建 Release 失败（{e.code}）：{detail}")
+    if not rel:
+        raise SystemExit("[错误] 未能获取 Release 信息，发布终止。")
     upload_url = rel.get("upload_url", "").split("{", 1)[0]
-    print(f"[信息] Release 已创建：{rel.get('html_url')}")
 
     # 2) 上传附件
     name = os.path.basename(zip_path)
