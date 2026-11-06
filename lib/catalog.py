@@ -1,0 +1,129 @@
+"""统一资源目录 catalog.json：全系统唯一事实源。
+
+条目无论是否下载都存在；downloaded 只表示「原文件已落地且正文已入库」。
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime
+from pathlib import Path
+
+from . import config, classify, qq
+
+DIMS = {
+    "classify": ["domain", "subject", "kind"],
+    "source": ["source", "group", "folder"],
+}
+
+
+def make_id(source: str, group: str, path: str) -> str:
+    return "r-" + hashlib.sha1(f"{source}|{group}|{path}".encode("utf-8")).hexdigest()[:16]
+
+
+def load() -> dict:
+    return config.read_json(config.state("catalog.json"), {"version": 1, "updated_at": "", "items": []})
+
+
+def save(cat: dict) -> None:
+    cat["version"] = 1
+    cat["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    config.write_json(config.state("catalog.json"), cat)
+
+
+def items(cat: dict) -> list[dict]:
+    return cat.setdefault("items", [])
+
+
+def by_id(cat: dict, rid: str) -> dict | None:
+    return next((x for x in items(cat) if x["id"] == rid), None)
+
+
+def upsert_manifest(cat: dict, rows: list[dict], cfg: dict) -> int:
+    """把来源元数据并入目录。保留已有的 downloaded / note / asset / summary。"""
+    index = {x["id"]: x for x in items(cat)}
+    seen = set()
+    for r in rows:
+        source = r.get("source") or "QQ群"
+        group = r.get("group") or "未知群"
+        rid = r.get("id") or make_id(source, group, r["path"])
+        seen.add(rid)
+        dom, subj, kind = classify.classify(r, cfg)
+        old = index.get(rid) or {}
+        rec = {
+            "id": rid, "source": source, "group": group,
+            "group_id": r.get("group_id", ""), "path": r["path"], "name": r["name"],
+            "folder": r.get("folder", ""), "ext": r.get("ext", ""),
+            "size_bytes": r.get("size_bytes", 0), "size": r.get("size") or qq.fmt_size(r.get("size_bytes", 0)),
+            "uploader": r.get("uploader", ""), "uploaded_at": r.get("uploaded_at", ""),
+            "file_id": r.get("file_id", ""), "busid": r.get("busid", 102),
+            "domain": dom, "subject": subj, "kind": kind,
+            "downloaded": bool(old.get("downloaded")),
+            "asset": old.get("asset", ""), "note": old.get("note", ""),
+            "summary": old.get("summary", ""), "extract_status": old.get("extract_status", ""),
+            "body_chars": old.get("body_chars", 0), "local_path": r.get("local_path", ""),
+        }
+        if old.get("asset") and not Path(config.vault() / old["asset"]).exists():
+            rec.update({"downloaded": False, "asset": "", "note": "", "summary": "", "body_chars": 0})
+        index[rid] = rec
+    cat["items"] = [v for k, v in index.items() if k in seen or v.get("source") != "QQ群"]
+    return len(rows)
+
+
+def public(x: dict) -> dict:
+    """前端可见字段：绝不下发 file_id / 令牌 / 本地缓存绝对路径。"""
+    keys = ("id", "source", "group", "path", "name", "folder", "ext", "size", "size_bytes",
+            "uploader", "uploaded_at", "domain", "subject", "kind", "downloaded",
+            "asset", "note", "summary", "extract_status", "body_chars")
+    return {k: x.get(k, "") for k in keys}
+
+
+def _matches(x: dict, dim: str, node: list[str]) -> bool:
+    levels = DIMS[dim]
+    return all(str(x.get(levels[i], "")) == node[i] for i in range(min(len(node), len(levels))))
+
+
+def tree(cat: dict, dim: str, node: list[str]) -> list[dict]:
+    levels = DIMS.get(dim, DIMS["classify"])
+    if len(node) >= len(levels):
+        return []
+    key = levels[len(node)]
+    bucket: dict[str, dict] = {}
+    for x in items(cat):
+        if not _matches(x, dim, node):
+            continue
+        label = str(x.get(key, "") or "未分类")
+        b = bucket.setdefault(label, {"name": label, "count": 0, "downloaded": 0, "size_bytes": 0})
+        b["count"] += 1
+        b["downloaded"] += int(bool(x.get("downloaded")))
+        b["size_bytes"] += int(x.get("size_bytes") or 0)
+    out = list(bucket.values())
+    for b in out:
+        b["size"] = qq.fmt_size(b["size_bytes"])
+    return sorted(out, key=lambda b: (-b["count"], b["name"]))
+
+
+def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200) -> list[dict]:
+    q = (q or "").strip().lower()
+    out = []
+    for x in items(cat):
+        if not _matches(x, dim, node):
+            continue
+        if q and q not in (" ".join(str(x.get(k, "")) for k in
+                                    ("name", "path", "folder", "group", "domain", "subject", "kind", "summary"))).lower():
+            continue
+        out.append(public(x))
+    out.sort(key=lambda x: (not x["downloaded"], x["domain"], x["subject"], x["name"]))
+    return out[:limit]
+
+
+def counts(cat: dict) -> dict:
+    xs = items(cat)
+    return {
+        "total": len(xs),
+        "downloaded": sum(1 for x in xs if x.get("downloaded")),
+        "metadata_only": sum(1 for x in xs if not x.get("downloaded")),
+        "size_bytes": sum(int(x.get("size_bytes") or 0) for x in xs),
+        "domains": len({x.get("domain") for x in xs}),
+        "subjects": len({x.get("subject") for x in xs}),
+    }
