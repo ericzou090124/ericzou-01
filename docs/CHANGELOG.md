@@ -3,6 +3,21 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.2.0] - 2026-11-07
+
+下载流水线性能修复与并发入库（持续迭代第 9 轮）。
+
+### 修复（性能 bug）
+- **下载后不再全量重建索引**：`download.run()` 原本在每批下载后调用 `index.rebuild(cat)`（O(n) 全量重建 FTS），与早期 `refresh` 同样的瓶颈。改为 `index.sync(cat)`：只重算本批变化的条目，长期运行后开销随「未变化条目」比例下降（实测单批下载后 sync 远快于 rebuild）。闸门（confirm / 上限 / 离线锁定）完全不变。
+
+### 性能
+- **下载单批内并发**：拉取与抽取是 I/O 密集型，单批内用有界线程池（`min(RM_DOWNLOAD_WORKERS=4, 批大小)`）并行下载；设 `RM_DOWNLOAD_WORKERS=1` 可强制串行。任意线程异常整体降级回串行，保证不丢数据、不半途而废。
+- **`precheck` 一次性构建 id→item 映射**：替代原先「每个 id 各做一次 O(n) 线性 `by_id` 扫描」，批越大收益越明显，避免重复遍历 1625 条目录。
+
+### 验证
+- `tools/smoke_test.py` 新增用例 `[9]`：monkeypatch 下载依赖，断言 `download.run` 成功 2 条、且仅调用 `sync`（rebuild 调用 0 次）、条目原地标记为已下载；并行路径（`RM_DOWNLOAD_WORKERS=4`）正常返回。
+- 真实 catalog 复测 `precheck`：已下载 id 被正确拒绝、无效 id 优雅报错；`import server` 正常。
+
 ## [v2.1.0] - 2026-11-07
 
 索引维护与同步加速（持续迭代第 8 轮，候选 D 深化）。

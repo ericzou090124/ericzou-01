@@ -91,6 +91,67 @@ def main():
         fail("wechat_wcf.get_rooms 结构异常")
     print("[8] wechat_wcf 群清单持久化往返 + get_rooms 结构 OK")
 
+    # 下载流水线重构回归：用 sync 而非 rebuild，且并行路径不丢数据
+    import tempfile as _tf
+    from pathlib import Path as _P
+    from lib import download as _dl
+    _tmp = _P(_tf.mkdtemp(prefix="rm_dl_test_"))
+    _orig_vault = config.vault
+    config.vault = lambda: _tmp
+    class _FakeQQ:
+        @staticmethod
+        def online(): return True
+        @staticmethod
+        def fetch_url(gid, fid, busid): return "http://example/x.pdf"
+        @staticmethod
+        def download_to(url, dest):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text("body-bytes")
+        @staticmethod
+        def fmt_size(n): return f"{n}B"
+    class _FakeExtract:
+        @staticmethod
+        def extract(dest, mx): return ("body-bytes", "ok")
+        @staticmethod
+        def summarize(b): return "summary"
+    class _FakeVault:
+        @staticmethod
+        def asset_rel(x): return f"assets/{x['id']}.pdf"
+        @staticmethod
+        def write_note(x, body): return f"notes/{x['id']}.md"
+        @staticmethod
+        def build_outlines(c): return {}
+    _calls = {"rebuild": 0, "sync": 0}
+    class _FakeIndex:
+        @staticmethod
+        def body_path(iid): return config.state("bodies") / f"{iid}.txt"
+        @staticmethod
+        def rebuild(c): _calls["rebuild"] += 1; return 1
+        @staticmethod
+        def sync(c): _calls["sync"] += 1; return 1
+    _orig = (_dl.qq, _dl.vault, _dl.extract, _dl.index)
+    _dl.qq, _dl.vault, _dl.extract, _dl.index = _FakeQQ(), _FakeVault(), _FakeExtract(), _FakeIndex()
+    _dcat = {"version": 1, "items": [
+        {"id": "r-t1", "source": "QQ群", "group": "g", "path": "a.pdf", "name": "a.pdf",
+         "ext": ".pdf", "group_id": 123, "file_id": "f1", "busid": 102, "size_bytes": 10, "downloaded": False},
+        {"id": "r-t2", "source": "QQ群", "group": "g", "path": "b.pdf", "name": "b.pdf",
+         "ext": ".pdf", "group_id": 123, "file_id": "f2", "busid": 102, "size_bytes": 10, "downloaded": False},
+    ]}
+    os.environ["RM_DOWNLOAD_WORKERS"] = "4"  # 触发并行路径
+    try:
+        _r = _dl.run(_dcat, ["r-t1", "r-t2"], confirm=True)
+    finally:
+        _dl.qq, _dl.vault, _dl.extract, _dl.index = _orig
+        config.vault = _orig_vault
+        os.environ.pop("RM_DOWNLOAD_WORKERS", None)
+    if _r.get("succeeded") != 2:
+        fail(f"download.run 应成功 2 条，得到 {_r.get('succeeded')}: {_r}")
+    if _calls["rebuild"] != 0 or _calls["sync"] != 1:
+        fail(f"download.run 必须只用 sync 不用 rebuild：{_calls}")
+    if not (_dcat["items"][0]["downloaded"] and _dcat["items"][1]["downloaded"]):
+        fail("download.run 未就地标记条目为已下载")
+    print(f"[9] download.run 用 sync(非rebuild) 且并行路径成功 2 条，索引调用 {_calls}")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}
