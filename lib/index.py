@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sqlite3
@@ -37,7 +38,44 @@ def _new_connection() -> sqlite3.Connection:
         con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS}, tokenize='trigram')")
     except sqlite3.OperationalError:
         con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS})")
+    con.execute("CREATE TABLE IF NOT EXISTS idx_meta(item_id TEXT PRIMARY KEY, sig TEXT)")
     return con
+
+
+def _meta_str(x: dict) -> str:
+    return " ".join(str(x.get(k, "")) for k in
+                    ("name", "path", "folder", "group", "source", "domain", "subject", "kind", "summary"))
+
+
+def _body_clip(x: dict) -> str:
+    bp = body_path(x["id"])
+    if bp.is_file():
+        try:
+            return bp.read_text(encoding="utf-8", errors="replace")[:60000]
+        except OSError:
+            pass
+    return ""
+
+
+def _sig(x: dict) -> str:
+    """廉价变更指纹：元数据 + 正文文件 stat（size:mtime_ns），不读正文内容即可判定是否变化。"""
+    bp = body_path(x["id"])
+    try:
+        st = bp.stat()
+        bstat = f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        bstat = "0:0"
+    raw = f"{x.get('name', '')}|{_meta_str(x)}|{int(bool(x.get('downloaded')))}|{x.get('note', '')}|{x.get('asset', '')}|{bstat}"
+    return hashlib.md5(raw.encode("utf-8", "replace")).hexdigest()
+
+
+def _insert(con: sqlite3.Connection, x: dict) -> None:
+    con.execute(
+        "INSERT INTO fts(title, body, meta, item_id, downloaded, note, asset) VALUES (?,?,?,?,?,?,?)",
+        (x.get("name", ""), _body_clip(x), _meta_str(x), x["id"], int(bool(x.get("downloaded"))),
+         x.get("note", ""), x.get("asset", "")),
+    )
+    con.execute("INSERT OR REPLACE INTO idx_meta(item_id, sig) VALUES (?, ?)", (x["id"], _sig(x)))
 
 
 def connect() -> sqlite3.Connection:
@@ -109,30 +147,48 @@ def body_path(item_id: str) -> Path:
 
 
 def rebuild(cat: dict) -> int:
+    """全量重建：清空 fts 与 idx_meta 后逐条写入。用于「刷新」等需要整体重算的场景。"""
     _COUNT_CACHE["value"] = None
     con = _new_connection()
     try:
         con.execute("DELETE FROM fts")
+        con.execute("DELETE FROM idx_meta")
         n = 0
         for x in cat.get("items", []):
-            bp = body_path(x["id"])
-            body = ""
-            if bp.is_file():
-                try:
-                    body = bp.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    pass
-            meta = " ".join(str(x.get(k, "")) for k in
-                            ("name", "path", "folder", "group", "source", "domain", "subject", "kind", "summary"))
-            con.execute(
-                "INSERT INTO fts(title, body, meta, item_id, downloaded, note, asset) VALUES (?,?,?,?,?,?,?)",
-                (x.get("name", ""), body[:60000], meta, x["id"], int(bool(x.get("downloaded"))),
-                 x.get("note", ""), x.get("asset", "")),
-            )
+            _insert(con, x)
             n += 1
         con.commit()
         _COUNT_CACHE["value"] = n
         return n
+    finally:
+        con.close()
+
+
+def sync(cat: dict) -> int:
+    """增量同步：仅对新增 / 删除 / 变更的条目做增删改，避免每次捕获落库都全量重建。
+
+    指纹来自元数据 + 正文文件 stat（不读正文内容）；首次运行时 idx_meta 为空，等效于全量构建。
+    """
+    _COUNT_CACHE["value"] = None
+    con = _new_connection()
+    try:
+        desired = {x["id"]: _sig(x) for x in cat.get("items", [])}
+        existing = dict(con.execute("SELECT item_id, sig FROM idx_meta").fetchall())
+        # 删除：存在于索引但已不在目录中的条目
+        for iid in (i for i in existing if i not in desired):
+            con.execute("DELETE FROM fts WHERE item_id=?", (iid,))
+            con.execute("DELETE FROM idx_meta WHERE item_id=?", (iid,))
+        # 新增 / 变更：插入或先删后插
+        for x in cat.get("items", []):
+            iid = x["id"]
+            if iid in existing and existing[iid] == desired[iid]:
+                continue  # 未变化，跳过
+            if iid in existing:
+                con.execute("DELETE FROM fts WHERE item_id=?", (iid,))
+            _insert(con, x)
+        con.commit()
+        _COUNT_CACHE["value"] = len(cat.get("items", []))
+        return _COUNT_CACHE["value"]
     finally:
         con.close()
 

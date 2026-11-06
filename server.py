@@ -115,10 +115,11 @@ def wechat_flush() -> None:
     cat = ensure()
     n = catalog.upsert_manifest(cat, rows, config.CFG)
     catalog.save(cat)
-    index.rebuild(cat)
+    # 增量同步：仅重算变化的条目，避免每次捕获落库都全量重建索引（REVIEW 瓶颈#4）
+    index.sync(cat)
     vault.build_outlines(cat)
     wechat_wcf._note_captured()
-    print(f"[微信采集] 已并入 {n} 条文件元数据")
+    print(f"[微信采集] 已并入 {n} 条文件元数据（索引增量同步完成）")
 
 
 class Handler(BaseHTTPRequestHandler):
