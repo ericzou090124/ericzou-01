@@ -60,6 +60,27 @@ def main():
         fail(f"wechat_wcf.status 默认应 enabled=False 且 mode=wechatferry: {s}")
     print(f"[6] wechat_wcf.status ok (enabled={s.get('enabled')}, available={s.get('available')}, mode={s.get('mode')})")
 
+    # 空问题不应抛 NameError（修复 scope 在定义前被引用）
+    try:
+        r0 = ai.answer("", cat)
+        if not isinstance(r0, dict) or "answer" not in r0:
+            fail("ai.answer('') 返回结构异常")
+    except Exception as e:
+        fail(f"ai.answer('') 抛异常（应为优雅返回）：{type(e).__name__}: {e}")
+    print("[6b] ai.answer('') 不崩溃（空问题优雅返回）")
+
+    # LLM opener：本地直连、外部走代理
+    from lib import llm as _llm
+    import urllib.request as _ur
+    def _has_proxy(op):
+        return any(isinstance(h, _ur.ProxyHandler) for h in op.handlers)
+    local_op = _llm._opener_for("http://127.0.0.1:8080/v1/chat/completions")
+    ext_op = _llm._opener_for("https://api.openai.com/v1/chat/completions")
+    # 本地地址不应走代理（直连）；外部地址应带 ProxyHandler（沿用环境变量代理，沙箱出网必需）
+    if _has_proxy(local_op) or not _has_proxy(ext_op):
+        fail(f"llm opener 代理策略异常：local_has_proxy={_has_proxy(local_op)} ext_has_proxy={_has_proxy(ext_op)}")
+    print("[6c] llm opener: 本地直连 / 外部走代理 区分正确")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}

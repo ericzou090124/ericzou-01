@@ -7,12 +7,41 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import config
 
-OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _opener_for(url: str):
+    """本地地址直连（不走代理，避免代理把 localhost 也转发出去）；
+    外部地址沿用环境变量里的代理（沙箱/企业网通常必须经由代理才能出网）。"""
+    host = urllib.parse.urlparse(url).hostname or ""
+    if host in _LOCAL_HOSTS:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener()  # 默认 opener 会读取 HTTPS_PROXY/HTTP_PROXY
+
+
+def _call(req: urllib.request.Request, timeout: float, retries: int = 2):
+    """带退避的重试：对超时 / 连接中断 / 5xx 这类瞬时错误重试，避免偶发抖动直接答非所问。"""
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            return _opener_for(req.full_url).open(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            # 4xx 是确定性错误，不重试
+            if 400 <= e.code < 500:
+                raise
+            last = e
+        except Exception as e:  # 超时 / 连接被重置 / DNS 抖动等
+            last = e
+        if attempt < retries:
+            time.sleep(0.5 * (2 ** attempt))
+    raise last if last is not None else RuntimeError("llm call failed")
 
 
 def _base(s: dict) -> str:
@@ -45,7 +74,7 @@ def chat(system: str, user: str, s: dict | None = None) -> tuple[str | None, str
                                   data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                                   headers=headers)
     try:
-        with OPENER.open(req, timeout=float(s.get("timeout", 60))) as r:
+        with _call(req, timeout=float(s.get("timeout", 60))) as r:
             out = json.loads(r.read().decode("utf-8"))
         text = out["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
@@ -54,7 +83,7 @@ def chat(system: str, user: str, s: dict | None = None) -> tuple[str | None, str
         return None, f"{type(e).__name__}: {str(e)[:90]}"
     text = re.sub(r"<think>[\s\S]*?</think>", "", text or "", flags=re.I)
     text = re.sub(r"\s+", " ", text).strip()
-    return (text[:int(s.get("max_answer_chars", 260)) * 3] or None), ""
+    return (text[:int(s.get("max_answer_chars", 260))] or None), ""
 
 
 def test(s: dict | None = None) -> dict:
@@ -65,7 +94,7 @@ def test(s: dict | None = None) -> dict:
     req = urllib.request.Request(base + "/models",
                                   headers={"Authorization": "Bearer " + (config.api_key(s) or "local")})
     try:
-        with OPENER.open(req, timeout=6) as r:
+        with _call(req, timeout=6) as r:
             data = json.loads(r.read().decode("utf-8"))
         names = [m.get("id") or m.get("name") for m in data.get("data", data.get("models", []))]
         return {"ok": True, "provider": s.get("provider"), "model": _model(s),
