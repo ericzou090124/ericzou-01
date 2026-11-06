@@ -176,17 +176,18 @@ def main():
     upload_url = rel.get("upload_url", "").split("{", 1)[0]
     rel_id = rel.get("id")
 
-    # 若该 Release 已存在同名附件（重复发布同一版本），先删旧再传新，避免重复附件
+    # 若该 Release 已存在附件（重复发布同一版本），先删掉所有旧附件，避免新旧并存
     if rel_id:
-        name = os.path.basename(asset_path)
         try:
             r = api("GET", f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets", token)
             for a in json.loads(r.read().decode("utf-8")):
-                if a.get("name") == name:
+                try:
                     api("DELETE", f"https://api.github.com/repos/{repo}/releases/assets/{a['id']}", token)
-                    print(f"[信息] 已删除旧附件 {name}，准备替换为新构建的安装器")
+                    print(f"[信息] 已删除旧附件 {a.get('name')}")
+                except Exception as e2:
+                    print(f"[警告] 删除旧附件 {a.get('name')} 失败：{e2}")
         except Exception as e:
-            print(f"[警告] 清理旧附件失败（可忽略，继续上传）：{e}")
+            print(f"[警告] 列举旧附件失败（可忽略，继续上传）：{e}")
 
     # 2) 上传附件
     name = os.path.basename(asset_path)
