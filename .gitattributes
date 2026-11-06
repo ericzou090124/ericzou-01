@@ -1,0 +1,4 @@
+# 发布用压缩包（git archive）排除开发/发布工具，保持面向用户的 zip 干净
+tools/publish_release.py export-ignore
+tools/publish_release.bat export-ignore
+selfcheck_v123.py export-ignore
