@@ -25,6 +25,22 @@ Obsidian 里用「打开文件夹作为库」选择 `桌面/资源管理/`，右
 > 必须保持「关闭思考模式」开启，否则单问可达 51–325 秒；关闭后约 2–4 秒。
 > 模型没起时 AI 会自动降级到纯本地检索/摘录，仍返回源文件索引。
 
+## QQ 一键登录（网页扫码，不需要桌面二维码图片）
+
+QQ 登录态过期时，界面会显示「离线快照」并锁定下载。此时**不用再往桌面存图片**，任选一种方式打开登录页：
+
+1. **双击 `一键登录.bat`** — 自动确保本地服务在跑，并用默认浏览器打开登录页（最省事）。
+2. 主界面右上角 **「QQ 登录」** 按钮（离线时按钮会高亮）。
+3. 直接访问 `http://127.0.0.1:8787/login`。
+
+页面里就是**实时二维码**：手机 QQ 扫一扫 → 在手机上确认登录。二维码过期会**自动换成新的**，也可点「刷新二维码」立即换；NapCat 里若还保存着有效凭证，页面会给出「一键快速登录」按钮，连扫码都能省掉。
+
+扫码确认后程序会自动完成剩下的事：等待 OneBot 3000 就绪 → 自动刷新来源切回 `live` → 下载解锁 → 3 秒后跳回资源管理器。**不需要手动点「刷新来源」**。
+
+> **「我怎么刷新」**：手动刷新就是主界面**右上角的「刷新来源」按钮**（只读重新盘点元数据，不下载文件）；走登录页时这一步由程序自动完成。
+
+实现与安全：`lib/qqlogin.py` 通过本机 NapCat WebUI（默认 `127.0.0.1:6099`）拿实时二维码内容与扫码状态，WebUI token 从本机配置读取、会话凭证只在服务进程内存里；二维码由本机 OpenCV 渲染成图片（没有 OpenCV 时回落到 NapCat 自带缓存图），**不经过任何第三方二维码服务**；接口只向页面返回二维码版本标识，不下发登录链接原文；服务仅监听 `127.0.0.1:8787`。前置条件是 NapCat WebUI 在运行，未运行时页面会给出明确提示与控制台入口。
+
 ## 界面怎么用
 
 1. **逐级下钻**：左栏「分类大纲」或中间卡片，按 `领域 → 科目/主题 → 资源类型` 逐层点击；面包屑可回退。可切换「按来源」维度浏览（来源 → 群 → 群内目录）。
@@ -74,6 +90,7 @@ resource-manager/                      本仓库（程序）
 ├── lib/
 │   ├── config.py     配置、路径、settings/secrets
 │   ├── qq.py         OneBot 只读遍历 + 定向下载
+│   ├── qqlogin.py    NapCat WebUI 网页扫码登录 + 本机二维码渲染
 │   ├── wechat.py     限制声明 + 预留本地授权目录适配器
 │   ├── classify.py   领域 / 科目 / 资源类型 三级分类
 │   ├── catalog.py   catalog.json 单一事实源 + 树形查询
@@ -83,16 +100,16 @@ resource-manager/                      本仓库（程序）
 │   ├── index.py      FTS5（元数据 + 正文）
 │   ├── llm.py        本地模型 / 外部 API 抽象
 │   └── ai.py         grounded QA、目录统计问答、命中闸门
-├── web/               index.html / app.js / style.css（零构建）
+├── web/               index.html / app.js / style.css / login.html（零构建）
 ├── obsidian_plugin/   manifest.json / main.js / styles.css
 ├── tools/
 │   ├── bootstrap.py          离线引导（导入已有元数据快照）
+│   ├── open_login.py          一键登录：确保服务在跑并打开网页扫码页
 │   └── push_to_github.bat    推送到你的 GitHub 仓库
-├── docs/
-│   ├── DESIGN.md        实现流程 / 模块 / 数据流 / 交互 / 权限降级
-│   ├── ARCHITECTURE.md  技术实现路线
-│   └── VERIFICATION.md 本地试运行结果与已知问题
+├── docs/              DESIGN / ARCHITECTURE / VERIFICATION / RELEASE /
+│                      DEVLOG（开发日志）/ GUIDE（说明文字）/ CHANGELOG / PUSH / README
 ├── start.bat
+├── 一键登录.bat        双击 → 打开网页二维码，扫码后自动恢复在线
 └── state/            catalog.json / index.db / bodies/ / secrets.json（gitignore）
 ```
 
@@ -121,6 +138,11 @@ resource-manager/                      本仓库（程序）
 | `GET|POST /api/settings` | 读取 / 保存 AI 配置（密钥不回显） |
 | `POST /api/settings/test` | 测试模型接口连通性 |
 | `POST /api/reindex` | 重建索引与全部大纲 |
+| `GET /login` | QQ 网页扫码登录页（实时二维码，不需桌面图片） |
+| `GET /api/qqlogin/status` | WebUI / 扫码阶段 / 二维码图片 / 已保存账号 / 接口状态 |
+| `POST /api/qqlogin/refresh` | 强制刷新二维码 |
+| `POST /api/qqlogin/quick` | 用 NapCat 已保存凭证尝试免扫码快速登录 |
+| `POST /api/qqlogin/restore` | 等 OneBot 就绪后自动刷新来源、解锁下载 |
 
 ## 文档
 
@@ -137,5 +159,5 @@ resource-manager/                      本仓库（程序）
 
 ## 仓库
 
-`https://github.com/ericzou090124/ericzou-01.git` · 分支 `main` · 存档标签 `v1.0.0`（首次交付）、`v1.0.1`（开发日志与说明文字）。
+`https://github.com/ericzou090124/ericzou-01.git` · 分支 `main` · 存档标签 `v1.0.0`（首次交付）、`v1.0.1`（开发日志与说明文字）、`v1.1.0`（QQ 网页一键登录）。
 后续改动直接提交并推送到该仓库；`state/`（元数据、正文、密钥）与下载资料一律不入库。

@@ -66,6 +66,24 @@
 4. **整类下载单批上限 30 个**：防止一次拉走十几 GB，超出部分需再次确认；界面会提示剩余数量。
 5. **PDF 扫描件 / 老格式 doc/ppt/xls / zip 只登记元数据**，无正文；可选 PyMuPDF 缺失时 PDF 同样降级。
 6. **浏览器 GUI 未做自动化点击验证**：本次以 HTTP API + 静态资源 + 端到端下载/问答链路验证为主；界面交互逻辑由 `web/app.js` 提供，需人工双击 `start.bat` 后目视确认。
-7. **GitHub 推送凭证缺失**：本机无 `gh` CLI、无 git credential / SSH key，网络可达但需要用户提供仓库地址与授权方式；仓库已在本地完成初始化与提交（见 `docs/PUSH.md`）。
+7. **GitHub 已推送**：用户提供仓库地址后，本机 git 凭据实际可用，`main`、`v1.0.0`、`v1.0.1` 均已推送并核实（详见 `docs/PUSH.md`）；`git ls-files` 无 `state/` 与密钥。
 8. **本机 Bonsai2 常驻显存约 7.3 GB**（沿用上一项目实测），关闭思考模式后单问 2–4 秒；模型未启动时 AI 自动降级为纯本地检索。
-9. **QQ 登录态会过期**：23:05 复测时 NapCat 返回 `login_required=true`，二维码已放到桌面 `qq_login_qrcode.png`。程序当前处于离线快照模式（1625 条目录与 6 个已下载文件完好、下载锁定），需用户扫码后在界面点「刷新来源」恢复在线。程序不保存也不索要 QQ 账号密码。
+9. **QQ 登录态会过期，但已不再依赖桌面图片**：23:05 NapCat 返回 `login_required=true`；23:25 起改用 `http://127.0.0.1:8787/login` 网页实时二维码。扫码仍需账号本人在手机确认（程序无法代扫）；确认后自动恢复在线，不再要求手动点「刷新来源」。程序不保存也不索要 QQ 账号密码。
+10. **页面前置条件**：NapCat WebUI（默认 6099）必须在运行；若未运行，登录页会明确提示并给出 WebUI 控制台入口，不会静默失败。
+
+## 6. QQ 网页一键登录验证（23:25 追加）
+
+| # | 用例 | 结果 |
+| --- | --- | --- |
+| 1 | WebUI 认证 | ✅ `SHA256(token+".napcat")` → `/api/auth/login` 拿到 `data.Credential`；`Bearer` 调 `/api/QQLogin/*` 返回 `code=0` |
+| 2 | 实时二维码来源 | ✅ `CheckLoginStatus` → `qrcodeurl=https://txz.qq.com/p?k=…`；`GetQQLoginQrcode` 一致；阶段 `waiting_qrcode` |
+| 3 | 二维码图片可扫 | ✅ OpenCV 渲染 450×450 PNG，`cv2.QRCodeDetector` 解码结果与登录链接**逐字一致**；`qr_source=opencv` |
+| 4 | 过期自动换新 | ✅ `/api/qqlogin/refresh` → `ok=true`，其后 `qr_key` 改变、图片重新生成，页面轮询 2.5 s 自动换图 |
+| 5 | 登录页与入口 | ✅ `/login` 200（7459 B）；主界面 `index.html` / `app.js` 均含 `btn-login`；离线提示给出网页入口 |
+| 6 | 免扫码快速登录 | ✅ 检测到 NapCat 已保存账号 `3803328585 / Elfi, isQuickLogin=true`，页面提供 `SetQuickLogin` 按钮（凭证失效时自动回到扫码） |
+| 7 | 未登录时的恢复接口 | ✅ `restore` 明确返回「请先扫码并确认」，不误报已登录；下载闸门仍拒绝 |
+| 8 | 隐私 | ✅ `/api/qqlogin/status` 不含 `qr_url`，只返回 16 位 `qr_key`；登录页源码无 `txz.qq.com` 硬编码；token / Credential 不下发页面、不写日志；服务仅 `127.0.0.1` |
+| 9 | 扫码后的自动恢复链路 | ⏳ 需账号本人用手机 QQ 扫码确认后才能实测；代码路径为 `isLogin=true` → `restore` 等 OneBot 3000 → `refresh()` → `mode=live` → 下载解锁 → 3 s 跳回 |
+| 10 | 健康检查与一键入口时序 | ✅ QQ 离线时 `/api/health` 原每次实时探 OneBot 耗时约 2.05 s，卡掉 `open_login.py` 的 2 s 探活并误起第二个实例；改用状态缓存后 health 约 5 ms，入口脚本只打开一次 `/login`，端口已监听时不重复启动 |
+
+> 桌面那张过期的 `qq_login_qrcode.png` 已不再被程序使用（未删除，属用户桌面文件，需本人确认后再清理）。

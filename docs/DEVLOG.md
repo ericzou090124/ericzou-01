@@ -114,6 +114,26 @@
 - 再补一处界面可用性：离线原因与恢复方式原只在点「刷新来源」时闪一次 toast，改为侧栏来源区常驻醒目警告条，用户打开界面就能看到「下载已锁定」。
 - 全量语法检查通过后分两次提交（`2ad755b` 代码修复、`02b1227` 文档），打注附标签 `v1.0.1` 并推送 `main` 与标签；`state/`、密钥、下载资料用 `git ls-files` 自检确认未入库。
 
+## 23:25 — QQ 网页一键登录（替代桌面二维码图片）
+
+**用户反馈**：「我怎么刷新，桌面上的那个二维码过期了，我希望你为我生成一个可以不用搞张图片放桌面的，可以打开一个网页，里面是二维码，扫了之后就可以登陆的那种一键登陆方式」。两件事：讲清「刷新」在哪，以及把登录做成网页里的一键闭环，不再往桌面丢图片。
+
+**先摸清二维码到底从哪来**（没有凭印象猜）：
+- 桌面 `qq_login_qrcode.png` 只有 598 B，已过期；`qr_login_result.json` 是 `{"status":"failed","error":"账号配置写入失败"}`。
+- NapCat 运行时在 `%LOCALAPPDATA%/OmniQQ-MCP/napcat_runtime/shell_node/`，二维码缓存是 `napcat/cache/qrcode.png`（mtime 实时更新）；**6099 端口是 NapCat WebUI**（Express，301 → `/webui`），3000 / 3001 均未监听。
+- 直接请求 `/api/QQLogin/*` 返回 `Unauthorized`。从前端 bundle `index-1uVwnAOV.js` 里读到认证方式：先 `POST /api/auth/login` 带 `{"hash": SHA256(token + ".napcat"), "totpCode": ""}` 换 `data.Credential`，之后用 `Authorization: Bearer <Credential>`。
+- 用 `webui.json` 的 token 实测成功：`CheckLoginStatus` → `isLogin=false, loginPhase=waiting_qrcode, qrcodeurl=https://txz.qq.com/p?k=…`；`GetQQLoginQrcode` 返回同一链接；`GetQuickLoginListNew` 有已保存账号 `3803328585 / Elfi, isQuickLogin=true`；另有 `RefreshQRcode` 与 `SetQuickLogin` 可调用。
+
+**决策**：不弹桌面图片、不调用外部二维码服务。二维码内容由 WebUI 实时给出，本机 OpenCV `QRCodeEncoder` 渲染成 450×450 PNG 的 data URL 直接放网页；OpenCV 缺失时回落到 NapCat 自带 `cache/qrcode.png`。登录链接原文不下发前端，只给 16 位 `qr_key` 版本标识用于判断「二维码换了新的」。WebUI token 从本机配置读、会话凭证只在进程内存。
+
+**实现**：新增 `lib/qqlogin.py`、`web/login.html`、`tools/open_login.py`、`一键登录.bat`；`server.py` 加 5 个端点，`/api/qqlogin/restore` 会循环等 OneBot 3000 就绪（最多约 21 秒）再执行 `refresh()`，成功后下载解锁、页面 3 秒跳回主界面；`web/index.html` / `app.js` 加右上角「QQ 登录」按钮，离线时高亮并在侧栏写明入口。
+
+**验证**：`/login` 200（7459 B）；`/api/qqlogin/status` → `webui_online=true, phase=waiting_qrcode, qr_source=opencv, accounts=[3803328585]`；把 PNG 用 `cv2.QRCodeDetector` 解码，内容与 WebUI 登录链接**完全一致**（450×450）；点刷新后 `qr_key` 变化、图片换新；未扫码时 `restore` 明确失败不误报；离线快照下载闸门仍拒绝。
+
+**复核时又抓到一个真实时序 bug**：`/api/health` 在 QQ 离线时每次都实时探 OneBot，稳定耗时约 2.05 秒；而 `open_login.py` 用 2 秒超时探活，恰好被卡成「服务未运行」，误启动第二个服务实例并报「启动失败」。修：`health` 改用请求开头 `_sync_source()` 已实时同步的状态缓存（复测 5 ms）；`open_login.py` 超时放宽到 6 秒 + 重试，并加 TCP 端口监听兜底——端口已在监听就直接打开登录页，不再起第二个实例。复测一键登录入口只打开一次正确 URL。
+
+**结论**：用户要的「网页里有二维码、扫了就登录」已闭环；「怎么刷新」的答案写进 README 与登录页——右上角「刷新来源」是手动入口，走登录页时由程序自动完成，不用手动。QR 登录本身必须由账号本人在手机确认，程序无法代扫；这一步之后才做完整在线下载的实测。
+
 ---
 
 ## 维护备忘（给后续改动）
