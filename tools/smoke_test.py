@@ -81,6 +81,16 @@ def main():
         fail(f"llm opener 代理策略异常：local_has_proxy={_has_proxy(local_op)} ext_has_proxy={_has_proxy(ext_op)}")
     print("[6c] llm opener: 本地直连 / 外部走代理 区分正确")
 
+    # 微信监听群清单持久化往返
+    wechat_wcf.save_rooms(["wxid_a", "wxid_b"])
+    if wechat_wcf.load_rooms() != ["wxid_a", "wxid_b"]:
+        fail("wechat_wcf save/load_rooms 往返失败")
+    wechat_wcf.save_rooms([])  # 还原，避免遗留测试数据
+    gr = wechat_wcf.get_rooms(config.CFG)
+    if "login" not in gr or "rooms" not in gr:
+        fail("wechat_wcf.get_rooms 结构异常")
+    print("[8] wechat_wcf 群清单持久化往返 + get_rooms 结构 OK")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}

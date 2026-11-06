@@ -3,6 +3,21 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v1.9.0] - 2026-11-07
+
+微信监听群清单持久化 + 发现端点（持续迭代第 6 轮，GitHub WeChatFerry 拓展补全）。
+
+### 新增
+- **监听群清单持久化**：`lib/wechat_wcf.py` 新增 `load_rooms` / `save_rooms`（存于 `state/wechat_rooms.json`，已 gitignore），记住用户上次选择的群，重启后无需重选。
+- **群发现端点** `GET /api/wechat/wcf/rooms` 改走 `get_rooms(cfg)`，仅 available+login 时返回群列表。
+- **保存端点** `POST /api/wechat/wcf/rooms/save`：前端发现群后保存监听清单。
+
+### 变更（安全）
+- `start_capture` 不再「空 rooms = 监听全部群」。改为：请求传 rooms 优先，否则回退到已保存清单；**两者皆空则明确报错要求先选择群**，避免误采集无关群文件。
+
+### 文档
+- `tools/smoke_test.py` 增加群清单持久化往返 + `get_rooms` 结构断言。
+
 ## [v1.8.0] - 2026-11-07
 
 刷新来源改用增量同步（持续迭代第 5 轮）。

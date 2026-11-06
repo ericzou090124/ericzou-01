@@ -192,9 +192,7 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/wechat/wcf/status":
                 return self._send({"ok": True, **wechat_wcf.status(config.CFG)})
             if p == "/api/wechat/wcf/rooms":
-                st = wechat_wcf.status(config.CFG)
-                return self._send({"ok": True, "login": st.get("login"), "rooms": st.get("rooms", []),
-                                   "reason": st.get("reason", ""), "available": st.get("available")})
+                return self._send(wechat_wcf.get_rooms(config.CFG))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
             if p == "/api/health":
@@ -271,6 +269,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
+            if p == "/api/wechat/wcf/rooms/save":
+                wechat_wcf.save_rooms(body.get("rooms") or [])
+                return self._send({"ok": True, "rooms": wechat_wcf.load_rooms()})
             if p == "/api/wechat/wcf/capture/start":
                 rooms = body.get("rooms") or []
                 r = wechat_wcf.start_capture(config.CFG, rooms, wechat_on_row)

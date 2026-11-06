@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 import xml.etree.ElementTree as ET
@@ -110,6 +111,33 @@ def status(cfg: dict) -> dict:
     return out
 
 
+# ---- 监听群清单持久化：记住用户上次选择的群，重启后无需重选 ----
+def _rooms_path() -> Path:
+    return config.state("wechat_rooms.json")
+
+
+def load_rooms() -> list[str]:
+    try:
+        return [str(x) for x in json.loads(_rooms_path().read_text(encoding="utf-8")) if x]
+    except Exception:
+        return []
+
+
+def save_rooms(rooms: list[str]) -> None:
+    try:
+        _rooms_path().write_text(json.dumps([str(x) for x in (rooms or [])], ensure_ascii=False),
+                                 encoding="utf-8")
+    except Exception:
+        pass
+
+
+def get_rooms(cfg: dict) -> dict:
+    """发现已登录微信下的群列表（仅 available + login 时可用）。"""
+    st = status(cfg)
+    return {"ok": bool(st.get("login")), "available": st.get("available"),
+            "login": st.get("login"), "rooms": st.get("rooms", []), "reason": st.get("reason", "")}
+
+
 def _room_names(wcf) -> dict:
     try:
         return {c.get("wxid"): c.get("name", "") for c in wcf.get_contacts()}
@@ -203,8 +231,11 @@ _capture: "_Capture | None" = None
 _capture_lock = threading.Lock()
 
 
-def start_capture(cfg: dict, rooms: list[str], on_row) -> dict:
-    """启动微信监听采集。rooms 为空表示监听所有群。返回状态字典。"""
+def start_capture(cfg: dict, rooms: list[str] | None, on_row) -> dict:
+    """启动微信监听采集。rooms 为空时回退到已持久化的监听清单；两者皆空则要求先选择群。
+
+    监听范围严格限定为用户显式指定的群，绝不监听全部群，避免误采集无关群文件。
+    """
     global _capture
     st = status(cfg)
     if not st.get("enabled"):
@@ -213,14 +244,17 @@ def start_capture(cfg: dict, rooms: list[str], on_row) -> dict:
         return {"ok": False, "error": "未安装 wcferry（pip install wcferry）"}
     if not st.get("login"):
         return {"ok": False, "error": "微信未登录或 WeChatFerry 未连接"}
+    effective = list(rooms) if rooms else load_rooms()
+    if not effective:
+        return {"ok": False, "error": "未指定监听群：请在请求中传 rooms，或先 /api/wechat/wcf/rooms 发现群并保存监听清单"}
+    save_rooms(effective)
     with _capture_lock:
         if _capture is not None:
             _capture.stop()
         c = _wcf_client(cfg)
-        _capture = _Capture(c, rooms, on_row)
+        _capture = _Capture(c, effective, on_row)
         _capture.start()
-    return {"ok": True, "rooms": len(rooms) if rooms else "all",
-            "captured": _captured_count()}
+    return {"ok": True, "rooms": len(effective), "captured": _captured_count()}
 
 
 def stop_capture() -> dict:
