@@ -3,6 +3,19 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.4.0] - 2026-11-07
+
+启动期配置自检 + 诊断端点（持续迭代第 11 轮）。
+
+### 新增
+- **`lib/config_validate.py`**：启动期集中校验配置，把「配置问题」暴露成人类可读的清单，而不是在请求途中 KeyError 崩溃。检查项：vault 路径、QQ 群 `qq_group` 是否纯数字、下载白名单 `allowed_ext` 非空且带点、AI provider/endpoint、单次下载上限、host/port 合法性。仅报告、不改写配置。
+- **`server.main()` 启动自检**：打印配置错误（✗）与提醒（!），全绿则提示「配置自检通过」。
+- **`GET /api/diagnose`**：返回 `{ok, errors, warnings, mode, qq_online, index_docs, vault}`，供前端「系统诊断」面板与远程排障使用。
+
+### 验证
+- `tools/smoke_test.py` 新增 `[11]`：当前配置 `ok=True`；构造非法配置（port=0 / allowed_ext=[] / 非法群号）后 `validate()` 正确报出 3 条错误。
+- 实机启动 server 并请求 `/api/diagnose`，返回 `ok=true, mode=snapshot, index_docs=1625`，自检链路连通。
+
 ## [v2.3.0] - 2026-11-07
 
 问答检索退化路径 bug 修复（持续迭代第 10 轮）。

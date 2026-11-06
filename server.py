@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ai, catalog, config, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat, wechat_wcf  # noqa: E402
+from lib import ai, catalog, config, config_validate, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat, wechat_wcf  # noqa: E402
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -195,6 +195,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(wechat_wcf.get_rooms(config.CFG))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
+            if p == "/api/diagnose":
+                d = config_validate.validate()
+                d["mode"] = SOURCE_STATUS.get("mode")
+                d["qq_online"] = bool(SOURCE_STATUS.get("qq_online", False))
+                d["index_docs"] = index.count()
+                d["vault"] = str(config.vault())
+                return self._send({"ok": True, **d})
             if p == "/api/health":
                 # _sync_source() 已在请求开头实时探活；这里用状态缓存，
                 # 避免 QQ 离线时每次健康检查都白等一次 OneBot 超时。
@@ -360,6 +367,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    # 启动期配置自检：把配置问题集中暴露成可读清单，而不是在请求中才崩溃
+    _d = config_validate.validate()
+    if _d["errors"]:
+        print("配置错误：")
+        for e in _d["errors"]:
+            print("  ✗", e)
+    if _d["warnings"]:
+        print("配置提醒：")
+        for w in _d["warnings"]:
+            print("  !", w)
+    if _d["ok"] and not _d["warnings"]:
+        print("配置自检通过。")
+
     vault.init()
     print("初始化资源库…")
     r = refresh()

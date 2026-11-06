@@ -169,6 +169,28 @@ def main():
         fail(f"ai.answer 退化路径 mode 异常：{_ra}")
     print(f"[10] ai.answer 退化路径(FTS miss) 仍命中 found={_ra.get('found')} mode={_ra.get('mode')}")
 
+    # 配置自检：正常配置无 errors；坏配置应报可读错误
+    import copy as _copy
+    from lib import config_validate as _cv
+    _good = _cv.validate()
+    if not isinstance(_good, dict) or "ok" not in _good or "errors" not in _good or "warnings" not in _good:
+        fail("config_validate.validate 返回结构异常")
+    _orig_cfg = config.CFG
+    try:
+        _bad = _copy.deepcopy(config.CFG)
+        _bad["port"] = 0
+        _bad["allowed_ext"] = []
+        _bad["sources"]["qq"]["groups"]["pxb6"]["qq_group"] = "not-a-number"
+        config.CFG = _bad
+        _r = _cv.validate()
+        if _r["ok"]:
+            fail("config_validate 对非法配置未报错")
+        if len(_r["errors"]) < 3:
+            fail(f"config_validate 漏报错误：{_r['errors']}")
+    finally:
+        config.CFG = _orig_cfg
+    print(f"[11] config_validate 正常配置 ok={_good['ok']}；坏配置正确报出 {len(_r['errors'])} 条错误")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}

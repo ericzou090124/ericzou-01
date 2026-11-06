@@ -260,3 +260,20 @@
 **教训**：自测里凡调用会落盘的 `save/rebuild`，必须 patch 成 no-op 或使用临时 state 目录，绝不能让 mock 测试污染真实数据文件。`state/` 已被 gitignore，无 git 兜底，污染只能靠快照重建。
 
 **下一步**：v2.4.0 可探索——配置校验器（启动校验 config.json 必填项并给可读报错）、Obsidian 插件侧边栏检索增强、或下载失败重试/断点续传。
+
+---
+
+## 迭代 v2.4.0 — 启动期配置自检 + 诊断端点（第 11 轮）
+
+目标：把「配置问题」集中暴露成可读清单，避免请求途中静默崩溃。
+
+**改动**：
+- 新增 `lib/config_validate.py`：校验 vault 路径、QQ 群 qq_group 是否纯数字、allowed_ext 非空且带点、AI provider/endpoint、max_download_per_batch、host/port。只报告不改写。
+- `server.main()` 启动早期调用并打印 ✗/! 清单。
+- 新增 `GET /api/diagnose`：返回 ok/errors/warnings + mode/qq_online/index_docs/vault。
+
+**自测**：smoke_test 新增 `[11]`（正常 ok=True、坏配置报 3 错）；实机启动 server 后 `curl /api/diagnose` 返回 `ok=true, mode=snapshot, index_docs=1625`。
+
+**注意**：本地 curl 走代理会被拦（upstream connect failed），需 `--noproxy '*'`。这提示前端若在同一沙箱调试也需绕过代理访问 127.0.0.1；浏览器直连不受影响。
+
+**下一步**：v2.5.0 探索——下载失败重试/退避（QQ OneBot 偶发超时）、或 Obsidian 插件侧边栏检索增强。
