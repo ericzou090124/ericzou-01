@@ -72,7 +72,8 @@ def refresh(force_snapshot: bool = False) -> dict:
     CAT = catalog.load()
     n = catalog.upsert_manifest(CAT, rows, cfg)
     catalog.save(CAT)
-    idx = index.rebuild(CAT)
+    # 增量同步：刷新来源后只重算变化的条目（首次运行 idx_meta 为空时等效全量重建）
+    idx = index.sync(CAT)
     outlines = vault.build_outlines(CAT)
     SOURCE_STATUS = {"mode": mode, "online": live, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                      "groups": gs, "errors": errors, "qq_online": qq.online()}
