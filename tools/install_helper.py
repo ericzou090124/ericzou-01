@@ -28,7 +28,8 @@ def safe_input(prompt: str, default: str = "") -> str:
 
 def find_root() -> str | None:
     """从本文件向上有限层查找包含 server.py 的目录（不递归整棵目录树，避免卡死）。"""
-    cur = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.abspath(__file__))
+    cur = here
     for _ in range(5):
         if os.path.isfile(os.path.join(cur, "server.py")):
             return cur
@@ -36,6 +37,14 @@ def find_root() -> str | None:
         if parent == cur:
             break
         cur = parent
+    # 兜底：向下查一层直接子目录（兼容解压时多套了一层文件夹）
+    try:
+        for name in os.listdir(here):
+            sub = os.path.join(here, name)
+            if os.path.isdir(sub) and os.path.isfile(os.path.join(sub, "server.py")):
+                return sub
+    except OSError:
+        pass
     return None
 
 

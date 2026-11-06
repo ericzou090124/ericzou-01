@@ -12,10 +12,30 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://127.0.0.1:8787"
 LOGIN_URL = BASE + "/login"
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def find_root() -> Path:
+    """稳健查找含 server.py 的目录：先向上 5 层，再向下一层兜底（兼容解压时多套一层文件夹）。"""
+    here = Path(__file__).resolve().parent
+    cur = here
+    for _ in range(5):
+        if (cur / "server.py").is_file():
+            return cur
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    for sub in here.iterdir():
+        if sub.is_dir() and (sub / "server.py").is_file():
+            return sub
+    # 兜底：退回 tools 的上一级（原始假设）
+    return here.parent
+
+
+ROOT = find_root()
 
 
 def port_listening() -> bool:
