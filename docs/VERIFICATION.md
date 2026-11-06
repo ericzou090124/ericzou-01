@@ -55,6 +55,8 @@
 | 离线快照仍可能触发下载 | `download.run()` 只检查 `qq.online()`，强制快照而 QQ 恰在线时会放行旧 `file_id` | `server.py` 的 `/api/download` 增加 `SOURCE_STATUS.mode == "snapshot"` 前置拒绝 |
 | 同名文件覆盖 | 不同群/目录同名 | 资源与笔记文件名追加 6 位条目 id，`asset_rel()` / `note_rel()` 保证唯一 |
 | 实时遍历 1641 条、目录只有 1625 条 | 群内存在同路径同名的重复登记 | 以 `source|group|path` 做幂等 id 去重；已记录为预期行为 |
+| QQ 运行中途掉线，界面仍显示「在线」 | 状态是启动时缓存的，没有实时探活 | `server.py` 增加 `_sync_source()`：每次请求实时探活，掉线立即收紧为 `snapshot` 并锁定下载；恢复在线必须用户显式点「刷新来源」。离线回落补明确提示文案 |
+| 节点文件数显示偏小（如「学习」826 份显示成 200 份） | `/api/files` 的 `total` 取的是 `limit` 截断后的数组长度 | `catalog.query(..., with_total=True)` 返回真实匹配总数；响应增加 `shown` / `truncated`，界面在截断时提示「当前显示前 N 份，可继续下钻缩小范围」。复测 `学习` 节点 `total=826`、超 200 时 `truncated=true` |
 
 ## 5. 已知限制（未在本期解决）
 
@@ -66,3 +68,4 @@
 6. **浏览器 GUI 未做自动化点击验证**：本次以 HTTP API + 静态资源 + 端到端下载/问答链路验证为主；界面交互逻辑由 `web/app.js` 提供，需人工双击 `start.bat` 后目视确认。
 7. **GitHub 推送凭证缺失**：本机无 `gh` CLI、无 git credential / SSH key，网络可达但需要用户提供仓库地址与授权方式；仓库已在本地完成初始化与提交（见 `docs/PUSH.md`）。
 8. **本机 Bonsai2 常驻显存约 7.3 GB**（沿用上一项目实测），关闭思考模式后单问 2–4 秒；模型未启动时 AI 自动降级为纯本地检索。
+9. **QQ 登录态会过期**：23:05 复测时 NapCat 返回 `login_required=true`，二维码已放到桌面 `qq_login_qrcode.png`。程序当前处于离线快照模式（1625 条目录与 6 个已下载文件完好、下载锁定），需用户扫码后在界面点「刷新来源」恢复在线。程序不保存也不索要 QQ 账号密码。

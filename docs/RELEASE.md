@@ -16,10 +16,14 @@
 
 | 想看什么 | 读哪个文件 |
 | --- | --- |
+| 文档总索引与建议阅读顺序 | `docs/README.md` |
 | 一分钟上手、界面操作、权限降级表、微信评估结论 | `README.md` |
 | 整体流程 / 模块划分 / 数据流 / 界面交互 / 权限方案（交付顺序第 1 步） | `docs/DESIGN.md` |
 | 分层架构、15 条技术决策、核心链路伪代码、可移植性 | `docs/ARCHITECTURE.md` |
-| 本地试跑逐项结果、耗时、发现并修复的 5 个问题、已知限制 | `docs/VERIFICATION.md` |
+| **项目通读式说明文字**（背景、使用旅程、防臆造、微信限制、隐私安全） | `docs/GUIDE.md` |
+| **按时间顺序的开发日志**（每次决策、故障与修复） | `docs/DEVLOG.md` |
+| **版本更新日志** | `docs/CHANGELOG.md` |
+| 本地试跑逐项结果、耗时、发现并修复的问题、已知限制 | `docs/VERIFICATION.md` |
 | 本页：存档清单、验收清单、版本记录 | `docs/RELEASE.md` |
 | GitHub 仓库地址、后续提交约定、敏感文件排除规则 | `docs/PUSH.md` |
 
@@ -61,7 +65,8 @@ tools/              bootstrap / push 脚本
 
 | 版本 | 内容 |
 | --- | --- |
-| `v1.0.0` | 首次交付：QQ 只读盘点、三级分类、可视化下载（单个/多选/整类）、自动入库与 208 页大纲、FTS5、可配外部 API / 本地 Bonsai2 的 grounded AI、Obsidian 插件、微信限制评估、全套设计与验证文档 |
+| `v1.0.0` | 首次交付：QQ 只读盘点、三级分类、可视化下载（单个/多选/整类）、自动入库与 208 页大纲、FTS5、可配外部 API / 本地 Bonsai2 的 grounded AI、Obsidian 插件、微信限制评估、设计与验证文档 |
+| `v1.0.1` | 补充开发日志 `DEVLOG.md`、说明文字 `GUIDE.md`、更新日志 `CHANGELOG.md`、文档索引 `docs/README.md`；修复 QQ 运行中途掉线时状态显示与下载锁定 |
 
 ## 5. 已知限制（详见 VERIFICATION.md 第 5 节）
 
