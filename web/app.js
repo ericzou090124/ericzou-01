@@ -18,9 +18,13 @@ async function loadState() {
   const d = await api('/api/state');
   state.counts = d.counts; state.source = d.source;
   const on = d.source.mode === 'live';
+  const offlineNote = (!on && (d.source.errors || []).length)
+    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}</div>`
+    : '';
   $('#sources').innerHTML = `
     <div class="src"><span>QQ 群文件</span><span class="badge ${on ? '' : 'warn'}">${on ? '在线' : (d.source.mode === 'snapshot' ? '离线快照' : '未连接')}</span></div>
     <div class="src"><span>微信</span><span class="badge off">未接入</span></div>
+    ${offlineNote}
     <div class="muted" style="font-size:11px">${esc(Object.entries(d.source.groups || {}).map(([k,v]) => `${k} ${v.files}`).join(' · '))}</div>`;
   const w = d.wechat || {};
   $('#wechat-limits').innerHTML = `<details><summary>微信接入限制（点击展开）</summary>
