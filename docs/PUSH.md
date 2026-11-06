@@ -7,7 +7,10 @@
 | 仓库 | `https://github.com/ericzou090124/ericzou-01.git` |
 | 本地 remote | `origin` 已设置，分支 `main` 跟踪 `origin/main` |
 | 首次提交 | `52d728a feat: 资源管理器闭环 - QQ 群文件可视化导入、Obsidian 多级大纲与 grounded AI 检索` |
-| 推送结果 | ✅ `git push -u origin main` 成功（本机 git 凭据可用） |
+| 存档文档提交 | `ce184cf docs: 补充 v1.0.0 存档说明、验收清单与 GitHub 推送约定` |
+| v1.0.1 修复提交 | `2ad755b fix: QQ 掉线实时探活降级，并修正节点文件总数显示` |
+| v1.0.1 文档提交 | `02b1227 docs: 补充开发日志、说明文字、更新日志与文档索引` |
+| 推送结果 | ✅ `git push -u origin main` 成功（本机 git 凭据可用）；后续提交同样直接 push origin main |
 | 存档标签 | `v1.0.0`（首次交付）、`v1.0.1`（开发日志 / 说明文字 / 稳定性），均为注附标签并已推送 |
 
 ## 后续改动约定
