@@ -9,6 +9,8 @@ button,input,select{font:inherit;color:inherit}
 .crumb b{color:var(--text);font-weight:500}
 .search,.ask{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--surface);outline:none;min-width:0}
 .search{width:260px}.ask{flex:1}
+.search-wrap{display:flex;align-items:center;gap:6px}
+mark{background:var(--warn-bg);color:var(--warn);border-radius:3px;padding:0 1px;font-weight:600}
 .search:focus,.ask:focus{border-color:var(--info)}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}
 .btn:hover{border-color:var(--info)}.btn.primary{background:var(--info);color:#fff;border-color:var(--info)}

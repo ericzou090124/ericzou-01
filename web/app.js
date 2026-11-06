@@ -1,5 +1,16 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 命中高亮：先转义防 XSS，再按查询词（CJK 整串 / 拉丁按空白切词）不区分大小写包裹 <mark>
+function hl(text) {
+  const q = (state.search || '').trim();
+  const safe = esc(text);
+  if (!q) return safe;
+  const terms = q.split(/[\s,，。、；;]+/).map(t => t.trim()).filter(t => t.length >= 1);
+  if (!terms.length) return safe;
+  const pat = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((a, b) => b.length - a.length).join('|');
+  try { return safe.replace(new RegExp('(' + pat + ')', 'gi'), '<mark>$1</mark>'); }
+  catch (e) { return safe; }
+}
 const state = { dim: 'classify', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [] };
 
 async function api(path, opts) {
@@ -118,8 +129,8 @@ function renderFiles() {
   $('#files').innerHTML = state.files.map((x, i) => `
     <div class="file">
       <input type="checkbox" data-id="${esc(x.id)}" ${state.selected.has(x.id) ? 'checked' : ''} ${x.downloaded ? 'disabled' : ''}>
-      <div class="name">${esc(x.name)}
-        <div class="meta">${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + esc(x.summary.slice(0, 42)) : ''}</div>
+      <div class="name">${hl(x.name)}
+        <div class="meta">${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}</div>
       </div>
       <span class="link" data-id="${esc(x.id)}">预览</span>
     </div>`).join('');
@@ -270,6 +281,12 @@ $('#btn-ask').onclick = () => ask($('#ask').value);
 $('#ask').onkeydown = (e) => { if (e.key === 'Enter') ask($('#ask').value); };
 $('#btn-settings').onclick = settingsModal;
 $('#btn-ai').onclick = () => { $('#ai-card').scrollIntoView({behavior:'smooth'}); $('#ask').focus(); };
+$('#btn-ask-search').onclick = () => {
+  const q = ($('#search').value || '').trim();
+  if (!q) return toast('先在搜索框输入查询，再点「问 AI」');
+  $('#ask').value = q; ask(q);
+  $('#ai-card').scrollIntoView({behavior:'smooth'});
+};
 $('#chips').innerHTML = ['高等数学有哪些期末真题？', '复变函数积分变换怎么复习？', '线性代数课件资源在哪？', '宿舍水电费在哪交？']
   .map(q => `<span class="chip">${esc(q)}</span>`).join('');
 $('#chips').querySelectorAll('.chip').forEach(el => el.onclick = () => ask(el.textContent));
