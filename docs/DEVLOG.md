@@ -143,3 +143,65 @@
 - 改分类规则只动 `config.json`，改完 `POST /api/reindex` 或重启服务即可，不需要改代码。
 - 本地模型必须保持 `disable_thinking=true`；关掉后单问可达 51–325 秒。
 - NapCat 重启后旧 `file_id` 会失效，出现 `real fileUUID not found!` 时让用户点「刷新来源」。
+
+---
+
+# 持续迭代战役（v1.3.0 → v1.6.0，2026-11-07）
+
+> 本段为「构建安装器 + 全面审查 + 持续迭代 + GitHub 方案集成」任务的逐轮记录。
+> 逐轮「变更摘要 / 优化方向 / 下一步计划」见 [CHANGELOG.md](CHANGELOG.md)；系统审查见 [REVIEW.md](REVIEW.md)。
+
+## 迭代 0 — 安装器 / 基线 / 系统审查（v1.3.0 基线）
+
+**变更摘要**
+- `git init` 建立版本基线（原仓库无 `.git`），强化 `.gitignore`（排除 `secrets.json` / `state/` / `venv/` 等）。
+- 新建 `docs/REVIEW.md`：逐模块评估、性能瓶颈排序（①CJK 3-gram 粗粒度 ②SQLite 连接反复开关 ③catalog.load 重复反序列化 ④全量索引重建 ⑤ai hay 重复拼接）、可优化方向（A–H）与迭代路线图。
+- 重建 `tools/build_installer.py` 自解压安装器：base64 内嵌全程序到 `.bat`，PowerShell 读自身定位**唯一标记**解压（纯 ASCII 头部 + `chcp 65001`、UTF-8 无 BOM），支持 `RM_INSTALL_TARGET` / `RM_NO_LAUNCH` 环境变量。实测 56 文件往返一致、解压后 `server.py` 可启动并响应 `/api/health`。
+- 实测沙箱网络已恢复（GitHub API 200、pip 可用），不再受旧「无外网」限制。
+
+**优化方向**：检索精度（CJK 3-gram 过粗）、运行期开销（catalog 重复反序列化 / SQLite 连接反复开关 / AI hay 重复拼接）、索引全量重建（瓶颈④）。
+
+**下一步**：落地性能优化（迭代 1）；检索 GitHub 微信方案做源拓展（迭代 2）。
+
+## 迭代 1 — 检索精度与运行期开销优化（v1.4.0）
+
+**变更摘要**
+- `lib/index.py`：`query_terms` 支持 jieba 分词（未装回退 3-gram）；`connect()` 用 `threading.local()` 缓存只读连接；`count()` 走内存缓存。
+- `lib/catalog.py`：`load()` 加 mtime/size 缓存，避免每个请求重复 `json.loads`。
+- `lib/ai.py`：`answer()` 预计算候选 hay，评分循环不再重复拼接 9 字段。
+- `requirements-optional.txt` 补 jieba 与 `RM_NO_JIEBA=1` 关闭说明。
+
+**优化方向**：索引全量重建（REVIEW 瓶颈④）仍未解，捕获落库代价高。
+
+**下一步**：GitHub 调研并集成微信适配器（迭代 2）。
+
+## 迭代 2 — GitHub WeChatFerry 微信适配器（v1.5.0）
+
+**变更摘要**
+- 检索 GitHub 成熟方案，选用 **WeChatFerry（`wcferry`）** 作为微信接入技术路径（监听式，非 QQ 式全目录遍历）。
+- 新增 `lib/wechat_wcf.py`：监听指定群文件 / 附件消息（解析 appmsg XML `<type>∈{5,6,8}`），产出与 QQ 等构的 row，汇入同一流水线；默认关闭、未装 `wcferry` 时安全降级。
+- `server.py` 接入 `GET /api/wechat/wcf/status|rooms`、`POST /api/wechat/wcf/capture/start|stop`，`/api/state` 增加 `wechat.wcf` 子状态与 `capturing`；捕获 5s 防抖缓冲落库后自动并入目录并重建。
+- `config.json` 增加 `sources.wechat.wcf` 配置块（默认 `enabled:false`）。
+- 重建安装器（57 文件）包含新增模块。
+
+**优化方向**：捕获落库仍走 `index.rebuild` 全量重建，需改为增量（REVIEW 瓶颈④）。
+
+**下一步**：实现增量索引同步（迭代 3）。
+
+## 迭代 3 — 索引增量同步 + 回归自测（v1.6.0）
+
+**变更摘要**
+- `lib/index.py` 新增 `index.sync(cat)`：以 `idx_meta` 副表存「元数据 + 正文文件 stat」廉价指纹，仅对新增 / 删除 / 变更条目做增删改；首次运行 `idx_meta` 为空时等效全量，与 `rebuild` 一致。`rebuild` 改为复用共享 `_insert` 并同步维护 `idx_meta`。
+- `wechat_flush` 改用 `index.sync` 取代 `index.rebuild`，捕获落库不再全量重算（实测 1625 文档：sync(unchanged) 与 rebuild 结果一致，变更单条时总数不变仅该条重算）。
+- 新增 `tools/smoke_test.py` 回归自测：导入 / 索引一致性 / 微信降级 / 可选 LLM，退出码即回归信号。
+- 重建安装器（58 文件，含 `lib/wechat_wcf.py` 与 `tools/smoke_test.py`）。
+- 新增 / 重写 `README.md`、`docs/DEVLOG.md` 本段，补 `docs/CHANGELOG.md` 各版本条目。
+
+**优化方向（后续候选）**
+- A. 前端统一搜索框 + 命中高亮 / 结果计数（界面改动，无法在此环境渲染验证）。
+- B. LLM 流式输出 + 失败重试 / 退避；`ai` 模块抽离 provider 适配层。
+- C. 微信 `rooms` 自动发现并持久化为可选监听清单。
+- D. 增量同步扩展至「刷新」场景（目前刷新仍走 `rebuild` 全量，属预期）。
+- E. 发布到 GitHub（当前无 remote；需用户在 GitHub 建仓或提供 token 后 `git remote add` + `git push --tags`）。
+
+**下一步**：文档收尾 + 回归全绿；视预算与需求进入 A/B/C 或收尾发布。
