@@ -205,3 +205,23 @@
 - E. 发布到 GitHub（当前无 remote；需用户在 GitHub 建仓或提供 token 后 `git remote add` + `git push --tags`）。
 
 **下一步**：文档收尾 + 回归全绿；视预算与需求进入 A/B/C 或收尾发布。
+
+---
+
+## 迭代 v2.1.0 — 索引维护与同步加速（第 8 轮）
+
+目标：把候选 D「增量同步」继续深化，并补上「索引维护」能力。
+
+**改动**：
+- `idx_meta` schema 扩展为 `(item_id, csig, bstat)`：csig 为元数据指纹（O(1) 哈希，无磁盘 I/O），bstat 为正文文件 `size:mtime_ns`。
+- `sync()` 两阶段：先按 csig 跳过「元数据未变」条目，再按 bstat 只对正文变化的条目重读；未变化条目完全不 stat、不读正文。
+- 新增 `index.optimize()`（ANALYZE + VACUUM）、`db_size()`；`server.py` 新增 `POST /api/maintain`。
+- 新增 `tools/bench.py`：量化 rebuild vs sync 耗时 + 一致性断言。
+
+**自测**：smoke_test ALL PASS（10 项）；bench 显示 sync(无变化) ≈ 1503ms vs rebuild ≈ 2596ms，optimize 节省 774KB，断言全过。
+
+**问题**：旧 `idx_meta` 仅单列 `sig`，新 `_insert` 写 3 列会失败 → `_new_connection()` 增加 `SELECT csig` 探测 + 旧表 DROP/重建迁移。
+
+**结论**：索引层已具备「增量 + 维护 + 基准」完整闭环，长期运行后刷新开销随未变化条目比例下降。
+
+**下一步**：v2.2.0 探索新方向——下载并发（多线程拉取大体积群文件）、配置校验器（启动时校验 config.json 必填项）、或 Obsidian 插件增强（从笔记内直接触发搜索）。

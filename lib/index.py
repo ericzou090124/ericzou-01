@@ -38,7 +38,13 @@ def _new_connection() -> sqlite3.Connection:
         con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS}, tokenize='trigram')")
     except sqlite3.OperationalError:
         con.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5({_COLS})")
-    con.execute("CREATE TABLE IF NOT EXISTS idx_meta(item_id TEXT PRIMARY KEY, sig TEXT)")
+    con.execute("CREATE TABLE IF NOT EXISTS idx_meta(item_id TEXT PRIMARY KEY, csig TEXT, bstat TEXT)")
+    # 旧单列 schema 兼容：若实际只有 sig 列，重建为新结构（rebuild/sync 都依赖 csig/bstat）
+    try:
+        con.execute("SELECT csig FROM idx_meta LIMIT 1")
+    except sqlite3.OperationalError:
+        con.execute("DROP TABLE IF EXISTS idx_meta")
+        con.execute("CREATE TABLE idx_meta(item_id TEXT PRIMARY KEY, csig TEXT, bstat TEXT)")
     return con
 
 
@@ -57,15 +63,19 @@ def _body_clip(x: dict) -> str:
     return ""
 
 
-def _sig(x: dict) -> str:
-    """廉价变更指纹：元数据 + 正文文件 stat（size:mtime_ns），不读正文内容即可判定是否变化。"""
+def _bstat(x: dict) -> str:
+    """正文文件 stat（size:mtime_ns）；文件不存在则 0:0。不读正文内容。"""
     bp = body_path(x["id"])
     try:
         st = bp.stat()
-        bstat = f"{st.st_size}:{st.st_mtime_ns}"
+        return f"{st.st_size}:{st.st_mtime_ns}"
     except OSError:
-        bstat = "0:0"
-    raw = f"{x.get('name', '')}|{_meta_str(x)}|{int(bool(x.get('downloaded')))}|{x.get('note', '')}|{x.get('asset', '')}|{bstat}"
+        return "0:0"
+
+
+def _cat_sig(x: dict) -> str:
+    """仅元数据（不含正文内容）的廉价指纹：用于快速判断是否「元数据层面未变」。"""
+    raw = f"{x.get('name', '')}|{_meta_str(x)}|{int(bool(x.get('downloaded')))}|{x.get('note', '')}|{x.get('asset', '')}"
     return hashlib.md5(raw.encode("utf-8", "replace")).hexdigest()
 
 
@@ -75,7 +85,8 @@ def _insert(con: sqlite3.Connection, x: dict) -> None:
         (x.get("name", ""), _body_clip(x), _meta_str(x), x["id"], int(bool(x.get("downloaded"))),
          x.get("note", ""), x.get("asset", "")),
     )
-    con.execute("INSERT OR REPLACE INTO idx_meta(item_id, sig) VALUES (?, ?)", (x["id"], _sig(x)))
+    con.execute("INSERT OR REPLACE INTO idx_meta(item_id, csig, bstat) VALUES (?, ?, ?)",
+                (x["id"], _cat_sig(x), _bstat(x)))
 
 
 def connect() -> sqlite3.Connection:
@@ -165,27 +176,45 @@ def rebuild(cat: dict) -> int:
 
 
 def sync(cat: dict) -> int:
-    """增量同步：仅对新增 / 删除 / 变更的条目做增删改，避免每次捕获落库都全量重建。
+    """增量同步：仅对新增 / 删除 / 变更的条目做增删改，避免每次捕获落库都全量重建（REVIEW 瓶颈#4）。
 
-    指纹来自元数据 + 正文文件 stat（不读正文内容）；首次运行时 idx_meta 为空，等效于全量构建。
+    用两部分指纹判断：
+    - csig：仅元数据（不含正文内容）的指纹，O(1) 字符串哈希、无需磁盘 I/O；
+    - bstat：正文文件 stat（size:mtime_ns）。
+    常见场景（捕获落库后元数据与正文都不变）下，绝大多数条目 csig 命中即整条跳过——
+    既不 stat 也不读正文，sync 成本从「全量重建」降到「遍历比对 + 仅变更项重算」。
     """
     _COUNT_CACHE["value"] = None
     con = _new_connection()
     try:
-        desired = {x["id"]: _sig(x) for x in cat.get("items", [])}
-        existing = dict(con.execute("SELECT item_id, sig FROM idx_meta").fetchall())
+        # 旧表结构兼容迁移（早期版本 idx_meta 只有 sig 单列）
+        try:
+            existing = {r[0]: (r[1], r[2]) for r in
+                        con.execute("SELECT item_id, csig, bstat FROM idx_meta").fetchall()}
+        except sqlite3.OperationalError:
+            con.execute("DROP TABLE IF EXISTS idx_meta")
+            con.execute("CREATE TABLE idx_meta(item_id TEXT PRIMARY KEY, csig TEXT, bstat TEXT)")
+            existing = {}
+        desired = {x["id"]: _cat_sig(x) for x in cat.get("items", [])}
         # 删除：存在于索引但已不在目录中的条目
         for iid in (i for i in existing if i not in desired):
             con.execute("DELETE FROM fts WHERE item_id=?", (iid,))
             con.execute("DELETE FROM idx_meta WHERE item_id=?", (iid,))
-        # 新增 / 变更：插入或先删后插
         for x in cat.get("items", []):
             iid = x["id"]
-            if iid in existing and existing[iid] == desired[iid]:
-                continue  # 未变化，跳过
+            csig = desired[iid]
             if iid in existing:
-                con.execute("DELETE FROM fts WHERE item_id=?", (iid,))
-            _insert(con, x)
+                ec, eb = existing[iid]
+                if ec == csig:
+                    # 元数据未变：比对正文 stat，相同则整条跳过（不 stat 不读正文）
+                    if _bstat(x) == eb:
+                        continue
+                    con.execute("DELETE FROM fts WHERE item_id=?", (iid,))  # 仅正文变化
+                else:
+                    con.execute("DELETE FROM fts WHERE item_id=?", (iid,))  # 元数据变化
+                _insert(con, x)
+            else:
+                _insert(con, x)  # 新增
         con.commit()
         _COUNT_CACHE["value"] = len(cat.get("items", []))
         return _COUNT_CACHE["value"]
@@ -234,3 +263,27 @@ def count() -> int:
         pass
     _COUNT_CACHE["value"] = v
     return v
+
+
+def db_size() -> int:
+    p = config.state("index.db")
+    return p.stat().st_size if p.is_file() else 0
+
+
+def optimize() -> dict:
+    """SQLite 维护：ANALYZE 更新统计让查询规划更优，VACUUM 回收 sync/rebuild 产生的空闲页。
+
+    可在大量捕获/刷新后调用（如 /api/maintain）。对只读检索无影响，仅优化文件体积与规划。
+    """
+    _COUNT_CACHE["value"] = None
+    before = db_size()
+    con = _new_connection()
+    try:
+        con.execute("ANALYZE")
+        con.execute("VACUUM")
+        con.commit()
+    finally:
+        con.close()
+    after = db_size()
+    return {"ok": True, "before_bytes": before, "after_bytes": after,
+            "saved_bytes": max(0, before - after)}

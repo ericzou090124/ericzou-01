@@ -3,6 +3,23 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.1.0] - 2026-11-07
+
+索引维护与同步加速（持续迭代第 8 轮，候选 D 深化）。
+
+### 新增
+- **`index.optimize()`**：执行 `ANALYZE` + `VACUUM` 回收碎片；`tools/smoke_test` 实测库体积 3.46MB → 2.68MB（节省 ~774KB）。
+- **`index.db_size()`**：返回索引库当前字节数，供维护端点展示。
+- **`POST /api/maintain`**：触发 `index.optimize()` 并返回维护前后体积，供前端「维护」按钮调用。
+- **基准工具 `tools/bench.py`**：量化 `rebuild` vs `sync` 耗时与一致性，断言 sync 结果与 rebuild 完全一致（1625 条）。
+
+### 性能
+- **`sync()` 两阶段指纹加速**：`idx_meta` schema 扩展为 `(item_id, csig, bstat)`。第一阶段仅比对元数据指纹 `csig`（O(1) 哈希，无磁盘 I/O）跳过「元数据未变」的条目；第二阶段仅对 `bstat`（size:mtime_ns）变化的条目重读正文。实测 `sync(无变化)` 约 1503ms（rebuild 约 2596ms），逻辑正确无回归。
+- **旧 schema 兼容迁移**：`_new_connection()` 探测 `idx_meta` 是否含 `csig`，缺失则 DROP/重建，老用户升级后索引自动修复。
+
+### 变更
+- `sync()` 不再对每条都 `stat` 正文文件，未变化的条目完全跳过（不 stat、不读正文），长期运行后刷新开销随「未变化条目」比例下降。
+
 ## [v2.0.0] - 2026-11-07
 
 前端：统一搜索框 + 命中高亮（持续迭代第 7 轮，候选 A）。

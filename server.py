@@ -343,6 +343,8 @@ class Handler(BaseHTTPRequestHandler):
                 cat = ensure()
                 return self._send({"ok": True, "docs": index.rebuild(cat),
                                    "outlines": vault.build_outlines(cat)})
+            if p == "/api/maintain":
+                return self._send(index.optimize())
             if p == "/api/init":
                 return self._send({"ok": True, "created": vault.init(),
                                    "outlines": vault.build_outlines(ensure())})
