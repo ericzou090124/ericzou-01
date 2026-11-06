@@ -291,3 +291,18 @@
 **自测**：smoke_test 新增 `[12]`（瞬时失败 2 次后第 3 次成功，fetch 调用 3 次）与 `[13]`（永久「已失效」仅 1 次不重试）。ALL PASS。全程 patch `config.vault` 到临时目录 + `catalog.save` 为 no-op，确认不再污染真实数据。
 
 **下一步**：v2.6.0 探索——Obsidian 插件侧边栏检索增强、或下载断点续传（大文件分块）、或控制台/日志埋点便于排查。
+
+---
+
+## 迭代 v2.6.0 — 前端「系统诊断」面板（第 13 轮，闭环 v2.4.0）
+
+目标：把 v2.4.0 的诊断端点接到界面，让用户点一下就能看到配置与运行状态。
+
+**改动**：
+- `web/index.html` 顶栏新增「系统诊断」按钮（`id="btn-diagnose"`）。
+- `web/app.js` 新增 handler：调 `/api/diagnose`，弹模态框展示 ok/模式/QQ在线/索引篇数/库路径 + 错误清单 + 提醒清单；文本经 `esc()` 转义防注入。
+- `web/style.css` 新增 `.diag/.ok/.bad/.warn` 样式（红/绿/黄，兼容 dark 主题变量）。
+
+**自测**：实机启动 server，确认 `/` 含按钮、`/app.js` 含 handler、`/style.css` 含样式；`node --check app.js` 通过；`/api/diagnose` 返回 ok=true。
+
+**下一步**：v2.7.0 探索——Obsidian 插件侧边栏检索增强（笔记内直接触发检索）、下载断点续传、或运行日志/埋点以便排障。

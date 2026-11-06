@@ -280,6 +280,20 @@ $('#btn-download-category').onclick = () => {
 $('#btn-ask').onclick = () => ask($('#ask').value);
 $('#ask').onkeydown = (e) => { if (e.key === 'Enter') ask($('#ask').value); };
 $('#btn-settings').onclick = settingsModal;
+$('#btn-diagnose').onclick = async () => {
+  try {
+    const d = await api('/api/diagnose');
+    const errs = (d.errors || []).map(e => `<li class="bad">✗ ${esc(e)}</li>`).join('');
+    const warns = (d.warnings || []).map(w => `<li class="warn">! ${esc(w)}</li>`).join('');
+    const status = d.ok ? `<b class="ok">配置正常</b>` : `<b class="bad">存在 ${d.errors.length} 项配置错误</b>`;
+    modal(`<h3>系统诊断</h3>
+      <p>${status} ｜ 来源模式：<b>${esc(d.mode || '-')}</b> ｜ QQ 在线：<b>${d.qq_online ? '是' : '否'}</b> ｜ 索引：<b>${d.index_docs}</b> 篇 ｜ 库：<code>${esc(d.vault || '-')}</code></p>
+      <h4>错误（${d.errors.length}）</h4><ul class="diag">${errs || '<li class="ok">无</li>'}</ul>
+      <h4>提醒（${d.warnings.length}）</h4><ul class="diag">${warns || '<li class="ok">无</li>'}</ul>
+      <div class="row between" style="margin-top:10px"><button id="mc" class="btn small">关闭</button></div>`);
+    $('#mc').onclick = closeModal;
+  } catch (e) { toast('诊断失败：' + e.message); }
+};
 $('#btn-ai').onclick = () => { $('#ai-card').scrollIntoView({behavior:'smooth'}); $('#ask').focus(); };
 $('#btn-ask-search').onclick = () => {
   const q = ($('#search').value || '').trim();
