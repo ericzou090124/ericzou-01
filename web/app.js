@@ -72,7 +72,8 @@ async function reload() {
     state.path.push(el.dataset.name); state.selected.clear(); reload();
   });
   state.files = f.items;
-  $('#node-sub').textContent = `${f.total} 份文件${t.children.length ? ' · 可继续下钻到下一级' : ' · 当前层级为末级'}`;
+  const cap = f.truncated ? `（当前显示前 ${f.shown} 份，可继续下钻缩小范围）` : '';
+  $('#node-sub').textContent = `${f.total} 份文件${cap}${t.children.length ? ' · 可继续下钻到下一级' : ' · 当前层级为末级'}`;
   renderFiles();
 }
 

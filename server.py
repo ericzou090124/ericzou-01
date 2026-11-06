@@ -55,6 +55,7 @@ def refresh(force_snapshot: bool = False) -> dict:
         if rows:
             gs = {g["display"]: {"files": sum(1 for r in rows if r.get("group") == g["display"]),
                                   "live": False} for g in groups.values()}
+            errors = errors or ["QQ 接口不可用，已使用离线元数据快照；下载已锁定，点「刷新来源」可恢复在线"]
     if not rows:
         return {"ok": False, "error": "QQ 接口不可用且没有离线快照，请先运行 tools/bootstrap.py"}
     CAT = catalog.load()
@@ -105,7 +106,24 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _sync_source(self):
+        """QQ 服务可能在运行中途掉线：实时探活并立刻收紧为离线快照，避免界面谎报在线。
+
+        恢复在线不自动放开，必须用户显式点「刷新来源」，防止用失效 file_id 下载。
+        """
+        global SOURCE_STATUS
+        if SOURCE_STATUS.get("mode") != "live":
+            SOURCE_STATUS["qq_online"] = False
+            return
+        on = qq.online()
+        SOURCE_STATUS["qq_online"] = on
+        if not on:
+            SOURCE_STATUS = dict(SOURCE_STATUS, online=False, qq_online=False, mode="snapshot",
+                                 errors=["QQ 服务在运行中掉线，已自动切为离线快照；点「刷新来源」可恢复在线"])
+            print("QQ 服务掉线，已自动切为离线快照（下载已锁定）")
+
     def do_GET(self):
+        self._sync_source()
         u = urllib.parse.urlparse(self.path)
         p, q = u.path, urllib.parse.parse_qs(u.query)
         try:
@@ -127,9 +145,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"ok": True, "children": catalog.tree(ensure(), q.get("dim", ["classify"])[0], node)})
             if p == "/api/files":
                 node = json.loads(q.get("node", ["[]"])[0])
-                xs = catalog.query(ensure(), q.get("dim", ["classify"])[0], node,
-                                   q.get("q", [""])[0], int(q.get("limit", ["200"])[0]))
-                return self._send({"ok": True, "items": xs, "total": len(xs)})
+                xs, total = catalog.query(ensure(), q.get("dim", ["classify"])[0], node,
+                                         q.get("q", [""])[0], int(q.get("limit", ["200"])[0]),
+                                         with_total=True)
+                return self._send({"ok": True, "items": xs, "total": total,
+                                   "shown": len(xs), "truncated": total > len(xs)})
             if p == "/api/file":
                 x = catalog.by_id(ensure(), q.get("id", [""])[0])
                 if not x:
@@ -162,6 +182,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(f.read_bytes(), ctype=ctype)
 
     def do_POST(self):
+        self._sync_source()
         u = urllib.parse.urlparse(self.path)
         p, body = u.path, self._body()
         try:

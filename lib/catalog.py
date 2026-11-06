@@ -103,7 +103,8 @@ def tree(cat: dict, dim: str, node: list[str]) -> list[dict]:
     return sorted(out, key=lambda b: (-b["count"], b["name"]))
 
 
-def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200) -> list[dict]:
+def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200,
+          with_total: bool = False):
     q = (q or "").strip().lower()
     out = []
     for x in items(cat):
@@ -114,7 +115,11 @@ def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200) -
             continue
         out.append(public(x))
     out.sort(key=lambda x: (not x["downloaded"], x["domain"], x["subject"], x["name"]))
-    return out[:limit]
+    total = len(out)
+    page = out[:limit]
+    # total 必须是该节点匹配到的全部条数，而不是 limit 截断后的长度，
+    # 否则界面会把「共 826 份」错显示成「共 200 份」。
+    return (page, total) if with_total else page
 
 
 def counts(cat: dict) -> dict:
