@@ -8,6 +8,7 @@ import json
 import mimetypes
 import re
 import sys
+import threading
 import time
 import urllib.parse
 from datetime import datetime
@@ -15,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ai, catalog, config, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat  # noqa: E402
+from lib import ai, catalog, config, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat, wechat_wcf  # noqa: E402
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -88,6 +89,38 @@ def ensure() -> dict:
     return CAT
 
 
+# ---- 微信(WeChatFerry)监听采集：缓冲 + 防抖 upsert 进 catalog ----
+_WECHAT_BUF: list[dict] = []
+_WECHAT_TIMER = None
+_WECHAT_LOCK = threading.Lock()
+
+
+def wechat_on_row(row: dict) -> None:
+    global _WECHAT_TIMER
+    with _WECHAT_LOCK:
+        _WECHAT_BUF.append(row)
+        if _WECHAT_TIMER is None:
+            _WECHAT_TIMER = threading.Timer(5.0, wechat_flush)
+            _WECHAT_TIMER.daemon = True
+            _WECHAT_TIMER.start()
+
+
+def wechat_flush() -> None:
+    global _WECHAT_BUF, _WECHAT_TIMER
+    with _WECHAT_LOCK:
+        if not _WECHAT_BUF:
+            _WECHAT_TIMER = None
+            return
+        rows, _WECHAT_BUF, _WECHAT_TIMER = _WECHAT_BUF, [], None
+    cat = ensure()
+    n = catalog.upsert_manifest(cat, rows, config.CFG)
+    catalog.save(cat)
+    index.rebuild(cat)
+    vault.build_outlines(cat)
+    wechat_wcf._note_captured()
+    print(f"[微信采集] 已并入 {n} 条文件元数据")
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ResourceManager/1.0"
 
@@ -154,6 +187,12 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/napcat/status":
                 return self._send({"ok": True, "running": napcat_launch.is_running(),
                                    "url": qqlogin.webui_url()})
+            if p == "/api/wechat/wcf/status":
+                return self._send({"ok": True, **wechat_wcf.status(config.CFG)})
+            if p == "/api/wechat/wcf/rooms":
+                st = wechat_wcf.status(config.CFG)
+                return self._send({"ok": True, "login": st.get("login"), "rooms": st.get("rooms", []),
+                                   "reason": st.get("reason", ""), "available": st.get("available")})
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
             if p == "/api/health":
@@ -164,8 +203,11 @@ class Handler(BaseHTTPRequestHandler):
                                    "vault": str(config.vault())})
             if p == "/api/state":
                 cat = ensure()
+                wstatus = wechat.status(config.CFG)
+                wstatus["wcf"] = wechat_wcf.status(config.CFG)
+                wstatus["capturing"] = wechat_wcf.is_capturing()
                 return self._send({"ok": True, "source": SOURCE_STATUS, "counts": catalog.counts(cat),
-                                   "wechat": wechat.status(config.CFG),
+                                   "wechat": wstatus, "wcf": wstatus["wcf"],
                                    "settings": config.public_settings(),
                                    "download_cap": config.CFG.get("max_download_per_batch", 30)})
             if p == "/api/tree":
@@ -227,6 +269,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
+            if p == "/api/wechat/wcf/capture/start":
+                rooms = body.get("rooms") or []
+                r = wechat_wcf.start_capture(config.CFG, rooms, wechat_on_row)
+                r["capturing"] = wechat_wcf.is_capturing()
+                return self._send(r)
+            if p == "/api/wechat/wcf/capture/stop":
+                r = wechat_wcf.stop_capture()
+                r["capturing"] = wechat_wcf.is_capturing()
+                return self._send(r)
             if p == "/api/qqlogin/restore":
                 # 先快速判断 NapCat/OneBot 是否可达：完全没运行时立即给出可操作提示，
                 # 避免轮询 20+ 秒让页面像卡死（这是 v1.2.3 自测发现的真实卡顿）。

@@ -3,6 +3,23 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v1.5.0] - 2026-11-07
+
+微信源拓展（持续迭代第 2 轮，GitHub 方案集成）。检索 GitHub 成熟方案后选用 **WeChatFerry（PyPI: `wcferry`）** 作为微信接入技术路径，并落地为可选、默认关闭、安全降级的适配器。
+
+### 新增
+- **微信监听式适配器** `lib/wechat_wcf.py`：基于 WeChatFerry 注入本机微信 3.9.x 暴露的本地 RPC，以**监听式**捕获指定群的文件/附件消息（解析 appmsg XML `<type>∈{5,6,8}`），产出与 QQ 适配器等构的 row 字典，汇入同一 catalog/index/vault 流水线。
+- **服务端端点**：`GET /api/wechat/wcf/status`、`GET /api/wechat/wcf/rooms`、`POST /api/wechat/wcf/capture/start`、`POST /api/wechat/wcf/capture/stop`；`/api/state` 增加 `wechat.wcf` 子状态与 `capturing` 标记。捕获采用 5s 防抖缓冲（`wechat_on_row` → `wechat_flush`），落库后自动 `upsert_manifest → save → rebuild → build_outlines`。
+- **配置项** `sources.wechat.wcf`：`{enabled,host,port,note}`，默认 `enabled=false`。
+
+### 安全与降级
+- **绝不读取加密聊天库**：仅监听用户显式指定群、且为文件类消息；与 QQ 的全目录遍历式不同，微信为事件驱动监听。
+- **未安装 `wcferry` / 未登录微信 / 未开启**：端点与状态一律 `ok:false` + 明确可读原因，不抛错、不阻断主程序；主程序零新增硬依赖。
+- `available()` 仅尝试 `import wcferry`，失败即视为不可用，不影响 QQ / Web / AI 任何既有功能。
+
+### 文档
+- `config.json` 增加 `wcf` 块与启用说明；`docs/REVIEW.md` 路线图同步。
+
 ## [v1.4.0] - 2026-11-07
 
 性能与检索精度优化（持续迭代第 1 轮）。核心功能零新增硬依赖，所有增强均为可选/优雅降级。

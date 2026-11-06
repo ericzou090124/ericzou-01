@@ -14,7 +14,13 @@
     "wechat": {
       "enabled": false,
       "reason": "个人微信无开放 API / 无 OneBot 协议端；聊天库加密不可读；本地 msg/file 只有已落地文件，看不到云端未下载群文件与群归属。",
-      "authorized_local_dir": ""
+      "authorized_local_dir": "",
+      "wcf": {
+        "enabled": false,
+        "host": "127.0.0.1",
+        "port": 10086,
+        "note": "可选扩展：基于 GitHub 成熟方案 WeChatFerry（wcferry）的「监听式」群文件采集。需另行安装 wcferry 并运行 WeChatFerry 客户端 + 微信 3.9.x 登录；仅监听你指定群内的文件/附件消息，绝不读取加密聊天库。使用前请确认遵守微信平台规则与当地法律。"
+      }
     }
   },
   "allowed_ext": [".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".txt", ".md", ".csv", ".json", ".py", ".ipynb", ".png", ".jpg", ".jpeg", ".zip"],
