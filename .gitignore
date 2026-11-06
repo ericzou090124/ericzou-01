@@ -1,0 +1,26 @@
+state/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+
+# 密钥与本地状态（绝不进仓库）
+secrets.json
+state/secrets.json
+
+# 可选虚拟环境
+venv/
+tools/venv/
+.venv/
+*.egg-info/
+node_modules/
+
+# 编辑器 / 工具残留
+.wbapp/
+*.swp
+Thumbs.db
+.bak
+

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQ 一键登录 · 资源管理</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body{display:flex;align-items:flex-start;justify-content:center;padding:28px 16px}
+  .wrap{width:min(560px,100%)}
+  .topbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .topbar h1{font-size:18px;margin:0;font-weight:600}
+  .topbar .spacer{flex:1}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:12px}
+  .state{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pill{font-size:12px;padding:3px 9px;border-radius:20px;background:var(--info-bg);color:var(--info)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)}
+  .pill.ok{background:var(--ok-bg);color:var(--ok)}
+  .pill.off{background:var(--bg);color:var(--muted)}
+  .qrbox{display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0 4px}
+  .qrframe{width:288px;height:288px;display:flex;align-items:center;justify-content:center;
+           background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;box-sizing:border-box}
+  .qrframe img{width:100%;height:100%;image-rendering:pixelated;object-fit:contain}
+  .qrframe .placeholder{color:#888;font-size:12px;text-align:center;line-height:1.8;padding:12px}
+  .qrtip{font-size:13px;color:var(--muted);text-align:center;line-height:1.8}
+  .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .note{font-size:12px;color:var(--muted);line-height:1.9}
+  .note b{color:var(--text);font-weight:600}
+  .banner{padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.7;margin-bottom:12px;
+          background:var(--warn-bg);color:var(--warn)}
+  .banner.ok{background:var(--ok-bg);color:var(--ok)}
+  .banner.info{background:var(--info-bg);color:var(--info)}
+  code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:11px}
+  .acct{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>QQ 一键登录</h1>
+    <div class="spacer"></div>
+    <a class="btn small" href="/" target="_self">返回资源管理器</a>
+  </div>
+
+  <div id="banner" class="banner info">正在连接本机 NapCat，准备二维码…</div>
+
+  <section class="card">
+    <div class="state">
+      <span class="pill" id="p-phase">连接中</span>
+      <span class="pill off" id="p-webui">WebUI 检测中</span>
+      <span class="pill off" id="p-onebot">群文件接口 离线</span>
+      <span class="muted" id="updated" style="margin-left:auto"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="qrbox">
+      <div class="qrframe" id="qrframe"><div class="placeholder">正在获取二维码…<br>请稍候</div></div>
+      <div class="qrtip">用手机 <b>QQ → 扫一扫</b> 扫描上方二维码，并在手机上点「确认登录」<br>
+        二维码过期会<b>自动换成新的</b>，不用保存图片、不用手动重开页面</div>
+      <div class="row">
+        <button class="btn small warn" id="btn-qr">刷新二维码</button>
+        <button class="btn small primary" id="btn-start" style="display:none">启动 NapCat</button>
+        <a class="btn small" id="btn-webui" href="#" target="_blank" rel="noopener">打开 NapCat 控制台</a>
+      </div>
+      <div class="acct" id="accounts"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="note">
+      <b>登录之后会发生什么</b><br>
+      1. 页面检测到登录成功 → 自动等待群文件接口（OneBot 3000）就绪；<br>
+      2. 自动刷新来源，把资源管理器从「离线快照」切回「在线」，下载随之解锁；<br>
+      3. 显示成功并自动跳回资源管理器，<b>不用再手动点右上角「刷新来源」</b>。<br><br>
+      <b>隐私</b>：WebUI 登录凭证只在本机内存里，二维码内容只在本机渲染成图片，
+      不上传、不经过任何第三方二维码服务；本服务仅监听 <code>127.0.0.1:8787</code>。<br>
+      <b>手动刷新</b>：任何时候也可以在资源管理器右上角点「刷新来源」按钮。
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let lastQrKey = '', refreshCount = 0, restoring = false, done = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function banner(text, cls = 'info') {
+  const b = $('#banner');
+  b.className = 'banner ' + cls;
+  b.textContent = text;
+}
+function pill(id, text, cls) {
+  const e = $(id);
+  e.textContent = text;
+  e.className = 'pill ' + cls;
+}
+
+async function post(path, body = {}) {
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+                                body: JSON.stringify(body)});
+  return r.json();
+}
+
+function showFallback() {
+  $('#qrframe').innerHTML = '<div class="placeholder">登录已成功，但本地服务暂时无法访问。<br>'
+    + '请确认「资源管理」服务窗口仍在运行，然后 <a href="/" target="_self">点此打开资源管理器</a><br>'
+    + '或重新双击 start.bat / install.bat 启动服务。</div>';
+  banner('登录成功，但跳转失败：本地服务未响应。请确认服务窗口在运行后点上方链接。', 'warn');
+}
+
+async function goHome() {
+  // 跳转前先确认服务可达，避免「页面加载失败 / ERR_CONNECTION_REFUSED」
+  let tries = 0;
+  const attempt = () => {
+    fetch('/api/health', {cache: 'no-store'})
+      .then(() => { location.href = '/'; })
+      .catch(() => {
+        if (tries++ < 25) setTimeout(attempt, 800);
+        else showFallback();
+      });
+  };
+  attempt();
+}
+
+async function restore() {
+  if (restoring || done) return;
+  restoring = true;
+  banner('QQ 登录成功，正在等待群文件接口就绪并自动恢复在线来源…', 'info');
+  pill('#p-phase', '正在恢复在线', 'warn');
+  try {
+    const r = await post('/api/qqlogin/restore');
+    if (r.ok && r.mode === 'live') {
+      done = true;
+      banner('已恢复在线：' + (r.items || 0) + ' 条群文件元数据已刷新，下载已解锁。即将返回资源管理器…', 'ok');
+      pill('#p-phase', '登录完成', 'ok');
+      pill('#p-onebot', '群文件接口 在线', 'ok');
+      setTimeout(goHome, 1500);
+      return;
+    }
+    banner('QQ 已登录，但群文件接口暂未就绪：' + (r.error || '请稍后再点一次「刷新来源」'), 'warn');
+  } catch (e) {
+    banner('自动恢复失败：' + e + '；可回到资源管理器点右上角「刷新来源」。', 'warn');
+  }
+  restoring = false;
+}
+
+function render(d) {
+  $('#updated').textContent = d.updated_at ? '更新于 ' + d.updated_at : '';
+  $('#btn-webui').href = d.webui_url || '#';
+  pill('#p-webui', d.webui_online ? 'WebUI 在线' : 'WebUI 未连接',
+       d.webui_online ? 'ok' : 'warn');
+  pill('#p-onebot', d.onebot_online ? '群文件接口 在线' : '群文件接口 离线',
+       d.onebot_online ? 'ok' : 'off');
+
+  // NapCat 没运行时，显示「启动 NapCat」按钮
+  $('#btn-start').style.display = d.need_start ? '' : 'none';
+
+  if (d.is_login) {
+    pill('#p-phase', '登录成功', 'ok');
+    $('#qrframe').innerHTML = '<div class="placeholder">登录已完成<br>正在自动恢复在线来源…</div>';
+    restore();
+    return;
+  }
+  pill('#p-phase', d.phase_text || (d.webui_online ? '等待扫码' : '连接中'),
+       d.webui_online ? '' : 'warn');
+
+  if (d.qr_image) {
+    if (d.qr_key !== lastQrKey) {
+      if (lastQrKey) { refreshCount++; banner('检测到旧二维码已失效，已自动换成最新二维码。', 'info'); }
+      else if (!done) banner('二维码已就绪，请用手机 QQ 扫码并在手机上确认。', 'info');
+      lastQrKey = d.qr_key;
+    }
+    $('#qrframe').innerHTML = '<img alt="QQ 登录二维码" src="' + d.qr_image + '">';
+  } else {
+    $('#qrframe').innerHTML = '<div class="placeholder">暂时没有可用二维码<br>' +
+      (d.qr_source === 'napcat_cache' ? '正在使用 NapCat 缓存图片' : '请点「刷新二维码」重试') + '</div>';
+  }
+  if (d.login_error) banner('QQ 登录提示：' + d.login_error, 'warn');
+  else if (!d.webui_online && d.hint) banner(d.hint, 'warn');
+  else if (d.hint && !d.qr_image) banner(d.hint, 'warn');
+
+  const accs = (d.accounts || []).filter(a => a.quick);
+  $('#accounts').innerHTML = accs.length
+    ? '<span>本机已保存登录凭证，可免扫码：</span>' + accs.map(a =>
+        `<button class="btn small" data-uin="${a.uin}">一键快速登录 ${a.nick || a.uin}（${a.uin}）</button>`).join('') +
+      '<span>（凭证若也失效会自动回到扫码）</span>'
+    : '';
+  $('#accounts').querySelectorAll('[data-uin]').forEach(el => el.onclick = async () => {
+    banner('正在尝试免扫码快速登录…', 'info');
+    const r = await post('/api/qqlogin/quick', {uin: el.dataset.uin});
+    banner(r.ok ? (r.hint || '已提交快速登录，正在检测结果…') : ('快速登录失败：' + (r.error || '未知原因') + '，请改用扫码。'),
+           r.ok ? 'info' : 'warn');
+  });
+}
+
+async function tick() {
+  try {
+    const d = await (await fetch('/api/qqlogin/status', {cache:'no-store'})).json();
+    render(d);
+  } catch (e) {
+    banner('本地服务未响应，请确认资源管理器已启动（双击 start.bat）。', 'warn');
+  }
+}
+
+$('#btn-qr').onclick = async () => {
+  banner('正在向 QQ 申请新的二维码…', 'info');
+  const r = await post('/api/qqlogin/refresh');
+  lastQrKey = '';
+  if (!r.ok) banner('刷新失败：' + (r.error || '未知原因'), 'warn');
+  await sleep(1200);
+  tick();
+};
+
+$('#btn-start').onclick = async () => {
+  if ($('#btn-start').disabled) return;
+  $('#btn-start').disabled = true;
+  $('#btn-start').textContent = '启动中…';
+  banner('正在拉起本机 NapCat，请稍候（首次可能要等 QQ 登录完成）…', 'info');
+  let r;
+  try {
+    r = await (await fetch('/api/napcat/start', {method:'POST',
+              headers:{'Content-Type':'application/json'}, body:'{}'})).json();
+  } catch (e) {
+    banner('启动请求失败：' + e + '；也可手动打开控制台登录。', 'warn');
+    $('#btn-start').disabled = false; $('#btn-start').textContent = '启动 NapCat';
+    return;
+  }
+  if (r.ok) {
+    banner(r.msg || '已启动 NapCat，正在等待 WebUI 就绪，页面会自动刷新出二维码…', 'info');
+    lastQrKey = '';  // 让新二维码即使 key 相同也重新渲染
+  } else {
+    banner('启动失败：' + (r.error || '未知原因') + '；也可手动打开控制台登录。', 'warn');
+  }
+  $('#btn-start').disabled = false; $('#btn-start').textContent = '启动 NapCat';
+};
+
+tick();
+setInterval(() => { if (!done) tick(); }, 2500);
+</script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>首次配置向导 · 资源管理</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body{display:flex;align-items:flex-start;justify-content:center;padding:24px 16px}
+  .wrap{width:min(680px,100%)}
+  .topbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .topbar h1{font-size:18px;margin:0;font-weight:600}
+  .topbar .spacer{flex:1}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:15px}
+  .steps{display:flex;gap:8px;margin-bottom:14px}
+  .step{flex:1;text-align:center;font-size:12px;padding:8px 6px;border-radius:8px;background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+  .step.active{background:var(--info-bg);color:var(--info);border-color:var(--info)}
+  .step.done{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+  .banner{padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.7;margin-bottom:12px}
+  .banner.info{background:var(--info-bg);color:var(--info)}
+  .banner.warn{background:var(--warn-bg);color:var(--warn)}
+  .banner.ok{background:var(--ok-bg);color:var(--ok)}
+  .note{font-size:13px;color:var(--muted);line-height:1.9}
+  .note b{color:var(--text);font-weight:600}
+  ol.note{padding-left:20px}
+  code{background:var(--bg);padding:1px 6px;border-radius:4px;font-size:12px}
+  a.ext{color:var(--info)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .grow{flex:1}
+  textarea{width:100%;min-height:90px;background:var(--bg);color:var(--text);border:1px solid var(--line);
+           border-radius:8px;padding:10px;font-family:inherit;font-size:13px;resize:vertical;box-sizing:border-box}
+  #groups{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:230px;overflow:auto}
+  .gitem{display:flex;align-items:center;gap:8px;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg)}
+  .gitem input{width:16px;height:16px}
+  .gitem .gid{margin-left:auto;color:var(--muted);font-size:12px}
+  .muted{color:var(--muted)}
+  .mini{font-size:12px}
+  .checks{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>首次配置向导</h1>
+    <div class="spacer"></div>
+    <a class="btn small" href="/" target="_self">跳过，直接进入</a>
+  </div>
+
+  <div class="banner info">本向导只帮你做两件事：<b>① 安装并登录 NapCat（QQ 机器人，必需）</b>；<b>② 把你想管理的 QQ 群填进来</b>。其余分类、下载、AI 全部自动完成，<b>不用懂原理</b>。</div>
+
+  <div class="steps">
+    <div class="step active" id="s1">第 1 步 · 装 NapCat</div>
+    <div class="step" id="s2">第 2 步 · 填 QQ 群</div>
+    <div class="step" id="s3">第 3 步 · 完成</div>
+  </div>
+
+  <!-- STEP 1 -->
+  <section class="card" id="step1">
+    <h3>第 1 步：安装并登录 NapCat（必需）</h3>
+    <div class="note">
+      本程序通过 <b>NapCat</b> 读取你授权可见的 QQ 群文件。它是个本地小程序，用你的手机 QQ 扫码登录，<b>不保存你的账号密码</b>。
+    </div>
+    <ol class="note">
+      <li>到 NapCat 官网 <a class="ext" href="https://napneko.github.io/" target="_blank" rel="noopener">napneko.github.io</a> 下载 Windows 一键包
+        <code>NapCat.Shell.Windows.OneKey.zip</code>（已内置 QQ，无需另装）；</li>
+      <li>解压后双击 <code>napcat.bat</code> 启动，按控制台提示<b>用手机 QQ 扫码登录</b>；</li>
+      <li>登录成功后，NapCat 网页控制台默认在 <a class="ext" id="webui" href="#" target="_blank" rel="noopener">打开 NapCat 控制台</a>，保持它运行即可。</li>
+    </ol>
+    <div class="banner warn" id="nap-status">正在检测本机 NapCat…</div>
+    <div class="row">
+      <button class="btn primary" id="nxt1">我已安装并扫码登录，下一步</button>
+      <button class="btn" id="chknap">重新检测</button>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="card hidden" id="step2">
+    <h3>第 2 步：选择你要管理的 QQ 群</h3>
+    <div class="note">两种方式任选其一，结果一样：</div>
+    <div class="row">
+      <button class="btn" id="listg">① 自动列出我的群并勾选</button>
+    </div>
+    <div id="groups"></div>
+    <div class="note" style="margin-top:10px">或 ② 手动填写（每行一个，格式：<code>群显示名,群号</code>，例如 <code>考研资料群,123456789</code>）：</div>
+    <textarea id="manual" placeholder="考研资料群,123456789&#10;课程群,987654321"></textarea>
+    <div class="banner warn hidden" id="g-err"></div>
+    <div class="row">
+      <button class="btn" id="prev2">上一步</button>
+      <button class="btn primary grow" id="saveg">保存并继续</button>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="card hidden" id="step3">
+    <h3>第 3 步：完成</h3>
+    <div class="note">配置已写入 <code>config.json</code>。现在打开登录页用手机 QQ 扫码，让程序连上你的群文件；之后会自动跳回主界面。</div>
+    <div class="banner ok" id="final-note">准备就绪 🎉</div>
+    <div class="row">
+      <button class="btn" id="prev3">上一步</button>
+      <button class="btn primary grow" id="finish">打开登录页并进入主界面</button>
+      <button class="btn" id="skip">我自己改 config.json，直接进</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, o) => fetch(p, o).then(r => r.json());
+
+function setStep(n){
+  ['1','2','3'].forEach(i => {
+    $('#step'+i).classList.toggle('hidden', i !== String(n));
+    const el = $('#s'+i);
+    el.className = 'step' + (i === String(n) ? ' active' : (i < n ? ' done' : ''));
+  });
+  window.scrollTo(0,0);
+}
+
+async function napStatus(){
+  try{
+    const d = await (await fetch('/api/qqlogin/status', {cache:'no-store'})).json();
+    $('#webui').href = d.webui_url || '#';
+    if (d.webui_online || d.onebot_online){
+      $('#nap-status').className = 'banner ok';
+      $('#nap-status').textContent = '检测到本机 NapCat 已运行' + (d.onebot_online ? '，群文件接口已就绪 ✅' : '，请用手机 QQ 扫码登录后继续');
+    } else {
+      $('#nap-status').className = 'banner warn';
+      $('#nap-status').textContent = '还没检测到 NapCat：请先完成第 1 步（启动 napcat.bat 并用手机 QQ 扫码登录）。';
+    }
+  }catch(e){
+    $('#nap-status').className = 'banner warn';
+    $('#nap-status').textContent = '本地服务未响应，请确认资源管理器已启动（双击 start.bat）。';
+  }
+}
+
+let selected = [];   // 自动列出的群
+async function listGroups(){
+  const box = $('#groups'); box.innerHTML = '<div class="muted">正在从 QQ 读取你的群列表…</div>';
+  try{
+    const d = await api('/api/qq/groups');
+    const gs = (d.groups || []);
+    if (!gs.length){
+      box.innerHTML = '<div class="muted">没读到群列表。请确认：NapCat 已扫码登录、且群文件接口在线；或在下方手动填写。</div>';
+      return;
+    }
+    selected = gs.map(g => ({display: g.name, qq_group: g.group_id}));
+    box.innerHTML = gs.map((g,i) =>
+      `<label class="gitem"><input type="checkbox" data-i="${i}" checked>
+       <span>${g.name || '(未命名群)'}</span><span class="gid">${g.group_id}</span></label>`).join('');
+  }catch(e){
+    box.innerHTML = '<div class="muted">读取失败：' + e + '。可直接在下方手动填写。</div>';
+  }
+}
+
+function parseManual(){
+  const lines = ($('#manual').value || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const out = [];
+  for (const ln of lines){
+    const parts = ln.split(/[,，\t]/).map(s => s.trim());
+    const gid = parts[parts.length-1];
+    if (/^\d{5,12}$/.test(gid)) out.push({display: parts[0] || gid, qq_group: gid});
+  }
+  return out;
+}
+
+$('#nxt1').onclick = () => { setStep(2); listGroups(); };
+$('#chknap').onclick = napStatus;
+$('#listg').onclick = listGroups;
+$('#prev2').onclick = () => setStep(1);
+$('#prev3').onclick = () => setStep(2);
+$('#saveg').onclick = async () => {
+  const checked = [...document.querySelectorAll('#groups input:checked')].map(c => selected[+c.dataset.i]);
+  const manual = parseManual();
+  const groups = checked.concat(manual);
+  if (!groups.length){ $('#g-err').classList.remove('hidden'); $('#g-err').textContent = '请先勾选群，或在下方填写至少一个群号（5–12 位数字）。'; return; }
+  $('#g-err').classList.add('hidden');
+  const r = await api('/api/setup/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({groups})});
+  if (r.ok){ setStep(3); $('#final-note').textContent = `已保存 ${r.saved} 个群 ✅ 现在打开登录页扫码即可连上。`; }
+  else { $('#g-err').classList.remove('hidden'); $('#g-err').textContent = '保存失败：' + (r.error || '未知错误'); }
+};
+$('#finish').onclick = async () => {
+  await api('/api/setup/done', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  window.open('/login', '_blank');
+  setTimeout(() => { location.href = '/'; }, 1200);
+};
+$('#skip').onclick = async () => {
+  await api('/api/setup/done', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  location.href = '/';
+};
+
+napStatus();
+setStep(1);
+</script>
+</body>
+</html>
