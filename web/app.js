@@ -214,6 +214,7 @@ function settingsModal() {
 }
 
 $('#btn-login').onclick = () => window.open('/login', '_blank');
+$('#btn-setup').onclick = () => { window.location.href = '/setup'; };
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';
   try { const r = await api('/api/refresh', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
@@ -242,7 +243,22 @@ $('#chips').innerHTML = ['有哪些高数真题还没下载？', '上机考试�
   .map(q => `<span class="chip">${esc(q)}</span>`).join('');
 $('#chips').querySelectorAll('.chip').forEach(el => el.onclick = () => ask(el.textContent));
 
+async function checkSetup() {
+  try {
+    const d = await api('/api/setup');
+    $('#btn-setup').onclick = () => { window.location.href = '/setup'; };
+    if (!d.done) {
+      const b = $('#setup-banner');
+      b.classList.remove('hidden');
+      b.innerHTML = '👋 <b>第一次用？</b> 花 2 分钟完成 2 步配置（安装 NapCat + 填你的 QQ 群）就能开始，不用懂原理。'
+        + ' <button class="btn small primary" id="sb-go">开始配置</button>'
+        + ' <span class="muted">配置向导会一步步带你做。</span>';
+      $('#sb-go').onclick = () => { window.location.href = '/setup'; };
+    }
+  } catch (e) { /* 配置接口不可用时静默，不影响主界面 */ }
+}
+
 (async () => {
-  try { await loadState(); await reload(); addMsg('ai', '已连接本地资源库。可以直接用口语提问，回答下方会给出可点击的源文件索引；查不到会如实说明。');
+  try { await loadState(); await reload(); await checkSetup(); addMsg('ai', '已连接本地资源库。可以直接用口语提问，回答下方会给出可点击的源文件索引；查不到会如实说明。');
   } catch (e) { toast('初始化失败：' + e.message, 9000); }
 })();

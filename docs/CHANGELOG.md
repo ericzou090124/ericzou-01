@@ -3,6 +3,24 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v1.2.0] - 2026-11-06
+
+面向**零配置新手**：让第一次用、从没配置过的人也能在不懂原理的情况下轻松跑起来。
+
+### 新增
+
+- **首次配置向导** `web/setup.html` + `GET /api/setup` / `POST /api/setup/config` / `POST /api/setup/done` / `GET /api/qq/groups`：首次打开主界面会弹出横幅，进入向导后只需 2 步——① 安装并登录 NapCat（含官网下载链接与控制台地址）；② 在向导里「自动列出我的群」勾选或手动填群号，保存即写入 `config.json`。
+- **一键安装脚本** `install.bat`（Windows）/ `install.sh`（Mac·Linux）：检查 Python、按需安装可选增强（PyMuPDF / OpenCV）、自动启动服务并打开界面。
+- **依赖说明** `requirements.txt`（核心零依赖）+ `requirements-optional.txt`（可选增强）。
+- **新手文档** `docs/新手上手指南.md`：纯图文、不用懂原理的 3 步上手；仓库根目录新增 `新手必读.txt` 给压缩包用户。
+- `lib/qq.py` 新增 `list_groups()`：通过 OneBot `get_group_list` 自动列出当前 QQ 加入的群，供向导勾选。
+- `lib/config.py` 新增 `save_qq_groups()` / `setup_done()` / `mark_setup_done()`：原子写盘并同步内存。
+
+### 文档
+
+- `README.md` 顶部新增「🚀 第一次用？3 步上手」速览框，并链接新手上手指南。
+- `RELEASE.md` 增加 v1.2.0 版本记录与「给第一次使用的人」说明。
+
 ## [v1.1.0] - 2026-11-06
 
 QQ 网页一键登录：**不再往桌面生成二维码图片**，扫码后自动恢复在线下载。

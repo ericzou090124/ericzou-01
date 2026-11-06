@@ -146,3 +146,17 @@ def download_to(url: str, dest: Path, timeout: int = 240) -> Path:
     with OPENER.open(req, timeout=timeout) as r, open(dest, "wb") as f:
         shutil.copyfileobj(r, f)
     return dest
+
+
+def list_groups() -> list[dict]:
+    """返回本 QQ 加入的群列表（需 OneBot 在线）。用于新手向导自动列出可选群。"""
+    try:
+        data = call("/get_group_list", {}, timeout=12, retries=0)
+        out = []
+        for g in (data or []):
+            gid = g.get("group_id")
+            if gid:
+                out.append({"group_id": str(gid), "name": g.get("group_name", "") or ""})
+        return out
+    except Exception:
+        return []

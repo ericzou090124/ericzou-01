@@ -29,6 +29,15 @@ def load_snapshot() -> list[dict]:
     return (config.read_json(snapshot_path(), {}) or {}).get("items", [])
 
 
+def setup_status() -> dict:
+    """给新手配置向导的快照：是否已配置完、当前群、NapCat 控制台地址。"""
+    cfg = (config.CFG.get("sources", {}).get("qq", {}) or {}).get("groups", {}) or {}
+    demo = set(cfg.keys()) <= {"pxb6", "nzf4", "xfq12"}
+    return {"ok": True, "done": config.setup_done(), "demo": demo,
+            "groups": [{"key": k, **v} for k, v in cfg.items()],
+            "napcat_webui": qqlogin.webui_url()}
+
+
 def refresh(force_snapshot: bool = False) -> dict:
     """只读刷新来源元数据。接口不可用自动回落到离线快照，不下载任何文件内容。"""
     global CAT, SOURCE_STATUS
@@ -132,6 +141,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file("index.html")
             if p == "/login":
                 return self._file("login.html")
+            if p == "/setup":
+                return self._file("setup.html")
+            if p == "/api/setup":
+                return self._send(setup_status())
+            if p == "/api/qq/groups":
+                return self._send({"ok": True, "groups": qq.list_groups()})
             if p in ("/app.js", "/style.css"):
                 return self._file(p.lstrip("/"))
             if p == "/api/qqlogin/status":
@@ -258,6 +273,12 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/init":
                 return self._send({"ok": True, "created": vault.init(),
                                    "outlines": vault.build_outlines(ensure())})
+            if p == "/api/setup/config":
+                saved = config.save_qq_groups(body.get("groups") or [])
+                return self._send({"ok": True, "saved": len(saved)})
+            if p == "/api/setup/done":
+                config.mark_setup_done()
+                return self._send({"ok": True})
             return self._send({"ok": False, "error": "未知端点"}, 404)
         except Exception as e:
             return self._send({"ok": False, "error": f"{type(e).__name__}: {e}"}, 500)

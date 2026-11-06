@@ -1,0 +1,5 @@
+# 可选增强（不装也能正常运行；装了体验更好）
+#   PyMuPDF              抽取 PDF 正文与摘要（不装则 PDF 只登记元数据，无正文摘要）
+#   opencv-python-headless 在网页里本机渲染登录二维码（不装则改用 NapCat 自带缓存图）
+PyMuPDF
+opencv-python-headless

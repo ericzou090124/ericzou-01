@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,3 +75,28 @@ def public_settings() -> dict:
         "min_relevance": s.get("min_relevance", 0.22),
         "top_k": s.get("top_k", 5),
     }
+
+
+def save_qq_groups(groups: list[dict]) -> dict:
+    """新手向导保存 QQ 群配置（覆盖 sources.qq.groups）。原子写盘并同步内存。
+
+    仅接受「群号是纯数字」的条目，避免误把说明文字写进配置。
+    """
+    cleaned = {}
+    for i, g in enumerate(groups):
+        gid = str((g or {}).get("qq_group", "")).strip()
+        if not gid.isdigit():
+            continue
+        name = str((g or {}).get("display", "")).strip() or f"群{gid}"
+        cleaned[f"g{i + 1}"] = {"display": name, "qq_group": gid}
+    CFG.setdefault("sources", {}).setdefault("qq", {})["groups"] = cleaned
+    write_json(CONFIG_PATH, CFG)
+    return cleaned
+
+
+def setup_done() -> bool:
+    return state("setup_done.json").is_file()
+
+
+def mark_setup_done() -> None:
+    write_json(state("setup_done.json"), {"done": True, "at": datetime.now().isoformat()})
