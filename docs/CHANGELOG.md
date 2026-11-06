@@ -3,6 +3,17 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.7.0] - 2026-11-07
+
+HTTP 集成自测：锁定 API 契约（持续迭代第 14 轮）。
+
+### 新增
+- `tools/smoke_test.py` 新增 `[14]` 集成用例：在**隔离的临时 STATE + vault** 中起一个真实 `ThreadingHTTPServer`（复用真实 `qq_manifest.json` 走 snapshot 模式），依次请求 `/api/health`、`/api/diagnose`、`/api/tree`、`/api/files`、`/api/state`，断言均 `ok` 且返回结构正确。直连 127.0.0.1（绕开沙箱代理），用守护线程 + `shutdown` 干净收尾，**不污染真实 state/catalog/index**。
+- 自此自测分两层：单元层（mock 依赖，快）+ 集成层（真起服务打端点），回归覆盖从函数到 HTTP 全链路。
+
+### 验证
+- 实跑：`[14] 集成自测通过：health/diagnose/tree/files/state 均 ok（docs=1625, files_items=5）`；全程真实 catalog 仍 1625 条、未被污染。
+
 ## [v2.6.0] - 2026-11-07
 
 前端「系统诊断」面板（持续迭代第 13 轮，完成 v2.4.0 的诊断端点闭环）。

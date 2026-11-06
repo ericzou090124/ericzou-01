@@ -306,3 +306,26 @@
 **自测**：实机启动 server，确认 `/` 含按钮、`/app.js` 含 handler、`/style.css` 含样式；`node --check app.js` 通过；`/api/diagnose` 返回 ok=true。
 
 **下一步**：v2.7.0 探索——Obsidian 插件侧边栏检索增强（笔记内直接触发检索）、下载断点续传、或运行日志/埋点以便排障。
+
+---
+
+## 迭代 v2.7.0 — HTTP 集成自测锁定 API 契约（第 14 轮）
+
+目标：为 HTTP 层补一层端到端回归，避免后续重构静默破坏接口。
+
+**改动**：smoke_test 新增 `[14]`：在隔离临时 STATE+vault 中起真实 `ThreadingHTTPServer`（复用真实 qq_manifest.json 走 snapshot），依次打 `/api/health /diagnose /tree /files /state`，断言 ok 与结构；守护线程 + shutdown 收尾，不污染真实数据。
+
+**自测**：实跑集成用例通过（docs=1625）；真实 catalog 仍为 1625 条，确认零污染。
+
+**本轮（v2.1~v2.7）总览**：
+- v2.1.0 索引维护 optimize + sync 两阶段指纹加速 + 基准
+- v2.2.0 下载后增量同步 + 单批并发 + precheck 索引
+- v2.3.0 ai.answer 退化路径误报未找到修复 + 测试副作用补救
+- v2.4.0 启动期配置自检 + /api/diagnose 诊断端点
+- v2.5.0 下载失败重试 + 指数退避
+- v2.6.0 前端「系统诊断」面板闭环
+- v2.7.0 HTTP 集成自测锁定 API 契约
+
+全量自测从 10 项扩展到 15 项（单元+集成），每次迭代均 commit+tag+push 到 GitHub（v2.1.0~v2.7.0 标签齐全）。
+
+**下一步（若继续）**：Obsidian 插件侧边栏检索增强、下载断点续传、或运行日志/埋点。当前系统已覆盖性能（索引/下载并发/重试）、正确性（AI 退化路径）、健壮性（配置自检/诊断）、可观测性（集成测试）四大维度。

@@ -246,6 +246,56 @@ def main():
         os.environ.pop("RM_DOWNLOAD_WORKERS", None)
     print(f"[12] 下载瞬时失败重试成功（fetch {_cq.n} 次后成功）；[13] 永久失败不重试（fetch {_pq.n} 次）")
 
+    # 集成自测：起一个本地 server 实例（隔离临时 STATE + vault），验证 HTTP 层与 JSON 形状不回归
+    import time as _time, shutil as _sh, threading as _th, json as _json
+    import urllib.request as _ur, urllib.parse as _up
+    import server as _srvmod  # server.py 位于项目根目录（lib 之外），ROOT 已在 sys.path
+    _test_port = int(os.environ.get("RM_TEST_PORT", "8799"))
+    _tmp_state = _P(_tf.mkdtemp(prefix="rm_srv_state_"))
+    _tmp_vault = _P(_tf.mkdtemp(prefix="rm_srv_vault_"))
+    _snap_src = config.STATE / "qq_manifest.json"
+    if _snap_src.is_file():
+        _sh.copy2(_snap_src, _tmp_state / "qq_manifest.json")  # 复用真实快照，使刷新可走 snapshot 模式
+    _cfg_port, _orig_state, _orig_vault = config.CFG.get("port"), config.STATE, config.vault
+    config.CFG["port"] = _test_port
+    config.STATE = _tmp_state
+    config.vault = lambda: _tmp_vault
+    _srv = None
+    try:
+        _srv = _srvmod.ThreadingHTTPServer(("127.0.0.1", _test_port), _srvmod.Handler)
+        _th.Thread(target=_srv.serve_forever, daemon=True).start()
+        _op = _ur.build_opener(_ur.ProxyHandler({}))  # 直连 127.0.0.1，绕开沙箱代理
+        def _get(path):
+            with _op.open(f"http://127.0.0.1:{_test_port}{path}", timeout=30) as r:
+                return _json.loads(r.read().decode("utf-8"))
+        _ready = False
+        for _ in range(60):
+            try: _get("/api/health"); _ready = True; break
+            except Exception: _time.sleep(0.3)
+        if not _ready:
+            fail("集成测试：server 未在预期时间内就绪")
+        _hp = _get("/api/health")
+        if not _hp.get("ok") or _hp.get("docs") != index.count():
+            fail(f"集成 /api/health 异常：{_hp}")
+        _dp = _get("/api/diagnose")
+        if not _dp.get("ok"):
+            fail(f"集成 /api/diagnose 异常：{_dp}")
+        _tp = _get("/api/tree?dim=classify&node=" + _up.quote("[]"))
+        if not _tp.get("ok") or not isinstance(_tp.get("children"), list):
+            fail(f"集成 /api/tree 异常：{_tp}")
+        _fp = _get("/api/files?dim=classify&node=" + _up.quote("[]") + "&limit=5")
+        if not _fp.get("ok") or not isinstance(_fp.get("items"), list):
+            fail(f"集成 /api/files 异常：{_fp}")
+        _sp = _get("/api/state")
+        if not _sp.get("ok") or "counts" not in _sp:
+            fail(f"集成 /api/state 异常：{_sp}")
+        print(f"[14] 集成自测通过：health/diagnose/tree/files/state 均 ok（docs={_hp.get('docs')}, files_items={len(_fp.get('items', []))}）")
+    finally:
+        if _srv: _srv.shutdown(); _srv.server_close()
+        config.CFG["port"] = _cfg_port
+        config.STATE = _orig_state
+        config.vault = _orig_vault
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}
