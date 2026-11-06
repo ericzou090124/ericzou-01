@@ -71,12 +71,13 @@ tools/              bootstrap / push 脚本
 | `v1.0.1` | 补充开发日志 `DEVLOG.md`、说明文字 `GUIDE.md`、更新日志 `CHANGELOG.md`、文档索引 `docs/README.md`；修复 QQ 运行中途掉线时状态显示与下载锁定 |
 | `v1.1.0` | QQ 网页一键登录：`lib/qqlogin.py` + `web/login.html` + `一键登录.bat`，实时二维码、过期自动换新、免扫码快速登录、扫码后自动恢复在线；登录链接原文不下发页面 |
 | `v1.2.0` | 面向零配置新手：首次配置向导（2 步装 NapCat + 勾选 QQ 群）、一键安装脚本（install.bat / install.sh）、依赖说明、纯图文《新手上手指南》、仓库根目录 `新手必读.txt`；让第一次用的人不用懂原理也能轻松跑起来 |
+| `v1.2.1` | 修复 v1.2.0 压缩包「双击 install.bat 装不上」：install/start/一键登录 三个 .bat 改为纯 ASCII 启动器，中文提示全部移到 Python 助手（tools/install_helper.py、tools/start_helper.py），从根上消除 cmd 中文乱码；助手自动定位 server.py（兼容解压后多一层文件夹）并友好提示「先解压整个文件夹再运行」；可选依赖装失败不再中断；压缩包去掉顶层文件夹前缀；双击后自动打开浏览器 |
 
 ## 6. 给第一次使用的人
 
 仓库下载下来是一份源码包（或 GitHub Release 附件 `resource-manager-vX.Y.Z.zip`）。按下面做即可，**不需要理解任何原理**：
 
-1. 进入 `resource-manager` 文件夹，双击 `install.bat`（Mac / Linux 运行 `bash install.sh`）。它检查 Python、按需装可选增强、自动启动服务并打开 `http://127.0.0.1:8787`。
+1. **先解压整个压缩包到一个文件夹**（例如桌面新建「资源管理」文件夹，把里面所有文件放进去），**不要**在 .zip 里直接双击 `install.bat`。然后进入该文件夹，双击 `install.bat`（Mac / Linux 运行 `bash install.sh`）。它检查 Python、按需装可选增强、自动启动服务并打开 `http://127.0.0.1:8787`。
 2. 第一次打开会弹出「首次配置」横幅 → 点「开始配置」进入向导：
    - 第 1 步：按向导里的链接装好 NapCat（QQ 机器人，必需），用手机 QQ 扫码登录；
    - 第 2 步：在向导里「自动列出我的群」勾选，或手动填群号，保存。

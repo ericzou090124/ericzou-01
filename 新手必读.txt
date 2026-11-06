@@ -1,6 +1,13 @@
 资源管理 · 第一次用，看这一份就够
 =============================================
 
+【重要】先解压整个文件夹！
+  · 把 resource-manager 的压缩包「解压到」一个你找得到的文件夹
+    （例如桌面新建一个「资源管理」文件夹，把里面所有文件放进去）。
+  · 然后双击该文件夹里的「install.bat」。
+  ⚠ 千万不要在压缩包（.zip）里直接双击 install.bat ——
+    那样 Windows 只会抽出 install.bat 一个文件，找不到 server.py 就会报错。
+
 1) 双击「install.bat」(Windows) 或运行「bash install.sh」(Mac / Linux)
    它会检查 Python、按需安装可选增强，然后自动启动程序。
 
