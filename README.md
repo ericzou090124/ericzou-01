@@ -9,9 +9,17 @@
 [![Search](https://img.shields.io/badge/Search-SQLite_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](lib/index.py)
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
-[![Version](https://img.shields.io/badge/Version-v2.8.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v2.9.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![License](https://img.shields.io/badge/License-MIT-2E8B57?style=flat-square)](LICENSE)
 
 ---
+
+> [!TIP]
+> **🚀 第一次来？3 分钟跑起来，完全不用命令行**
+>
+> ① [⬇️ 下载一键安装器（Windows，双击即用）](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat) → ② **下载完直接双击它** → ③ 浏览器自动打开 `http://127.0.0.1:8787`，按页面「首次配置」向导点 3 下 → 完成。
+>
+> 想把仓库全部内容拿下来：[📦 完整内容包 ZIP](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-full.zip) · [全部 Releases](https://github.com/ericzou090124/ericzou-01/releases) · **[📖 零基础图文教程（下载 → 安装 → 配置 → 下载资料 → AI 问答 → Obsidian 完整闭环）](docs/INSTALL.md)**
 
 > [!IMPORTANT]
 > **这是一个纯本地、只读、授权范围受限的个人资料整理工具。**
@@ -164,6 +172,8 @@ flowchart LR
 
 ## 快速开始
 
+> **完全零基础？别看这一节**，直接打开 [📖 零基础安装与使用指南](docs/INSTALL.md)：从「我该下哪个文件」到「Obsidian 里看到知识库」，每一步都写清楚了，含常见问题与启动 / 停止 / 更新 / 卸载。下面是给熟悉命令行的人的浓缩版。
+
 ### 环境要求
 
 - Python **3.13+**（核心链路零第三方依赖）
@@ -171,16 +181,21 @@ flowchart LR
 - 微信功能（可选）：WeChatFerry + 微信 3.9.x
 - Obsidian（可选，用于阅读生成的知识库）
 
-### 方式一：自解压安装器（推荐给最终用户）
+### 方式一：一键安装器（推荐给所有人）
 
 ```text
-1. 双击 resource-manager-installer.bat
-2. 默认解压到同目录 resource-manager/ 并自动启动服务
-3. 浏览器打开 http://127.0.0.1:8787
+1. 打开最新版 Releases → Assets，下载 resource-manager-installer.bat
+   固定直链（永远指向最新版）：
+   https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat
+2. 直接双击它（不需要先解压、不需要命令行）
+3. 自动解压到 %USERPROFILE%\resource-manager，启动服务并打开 http://127.0.0.1:8787
+4. 点界面顶部「首次配置」向导：装 NapCat → 勾选 QQ 群 → 完成
 ```
 
+同页还有 `resource-manager-full.zip`（**仓库全部内容**：源码 + 全部文档 + 安装器 + 教程），下载后**先解压整个 zip**，再双击里面的 `start.bat`；以及 `SHA256SUMS.txt` 可校验文件完整性。
+
 可选环境变量：`RM_INSTALL_TARGET`（指定解压目录）、`RM_NO_LAUNCH=1`（只解压不启动）。
-首次使用会弹出「首次配置」向导：装 NapCat → 勾选/填写 QQ 群 → 完成。
+发布包由 `python tools/build_release_assets.py` 生成，资产由 `python tools/sync_github_releases.py --apply --assets-dir dist` 幂等上传，保证每个版本页面都有可下载入口。
 
 ### 方式二：源码运行（开发者）
 
@@ -382,6 +397,15 @@ python tools/version_audit.py --tags v2.7.0      # 指定版本
 ---
 
 ## 常见问题
+
+<details>
+<summary><b>我第一次进这个仓库，到底该下载哪个文件？完全不懂命令行怎么办？</b></summary>
+
+点 [最新版 Releases](https://github.com/ericzou090124/ericzou-01/releases/latest)，拉到页面底部 **Assets**，下载 **`resource-manager-installer.bat`**，**直接双击**即可（不用解压、不用命令行）。程序会自动装好、启动并打开浏览器。唯一的准备是本机装了 Python 3.10+（安装时勾选 `Add python.exe to PATH`）。
+
+想拿到仓库全部内容（源码 + 文档 + 教程）就下 `resource-manager-full.zip`，**先解压**再双击 `start.bat`。完整图文步骤见 **[docs/INSTALL.md](docs/INSTALL.md)**。
+
+</details>
 
 <details>
 <summary><b>主界面显示「离线快照」，下载按钮用不了？</b></summary>

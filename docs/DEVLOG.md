@@ -385,3 +385,44 @@
 ### 最终复跑（v2.8.0 发布后）
 
 `v2.8.0` 标签推送后重新运行 `python tools/version_audit.py`，报告从发布前快照的 26 标签更新为 **27 标签：23 PASS / 4 KNOWN / 0 未修复失败，退出码 0**，其中 `v2.8.0` 全项 ✅ PASS（含自带 `smoke_test.py` 16 项）。前文的「26 标签」是发布前的审计快照记录，保留不改以反映当时的过程。`python tools/smoke_test.py` 复跑仍为 ALL PASS。
+
+---
+
+## 迭代 v2.9.0 — 让 Releases 可下载、让小白能闭环（第 16 轮）
+
+时间：2026-11-07 14:36 (GMT+8)。用户新指令：「我希望下载 github 上的全部内容，Releases 有一个完整的教程或闭环，我现在进入库内不知道在哪里安装这套系统，为我生成一个简单方便的下载入口和指南，让小白也能轻松用我的程序实现复刻」。
+
+### 痛点定位（盘点结论）
+
+- 远端 27 个 Release 里**只有 v1.2.0 ~ v1.2.3 四个早期版本有附件**，最新版 `v2.8.0` 附件为空 → 进 Releases 找不到可下载的东西。
+- 仓库里其实已有 `resource-manager-installer.bat`（自解压）、`start.bat` / `install.bat`、`新手必读.txt`、`docs/新手上手指南.md`、`docs/GUIDE.md`，但**四份说明分散、无统一入口**；README 的「快速开始」写「双击 resource-manager-installer.bat」，却没说去哪拿这个文件。
+- 根目录安装器是 03:15 生成的旧快照，未包含 `LICENSE` / `FEATURES.md` / v2.x 文档。
+- 结论：问题不在功能，而在**发行链路**。要做的是「稳定直链 + 完整包 + 统一权威教程 + 每个 Release 正文闭环」。
+
+### 改动
+
+1. `docs/INSTALL.md`（新增，统一权威入口）：下载文件对照表 + 固定直链 → 准备 Python → 双击安装 → 首次配置向导 → **6 步完整闭环**（刷新来源 / 分类浏览 / 显式确认下载 / 全文检索与问 AI / Obsidian / 系统诊断）→ 启动·停止·更新·卸载速查 → 10 条 FAQ → SHA256 校验 → macOS / Linux → 文档索引。含 Mermaid 闭环图。
+2. `tools/build_release_assets.py`（新增）：复用 `build_installer.collect()` 的排除规则生成 3 个资产到 `dist/`，zip 内注入 `START_HERE.txt`（解压后第一眼看到的说明）与 `VERSION.txt`；构建完立刻 `verify_zip()` 校验 17 个关键文件 + CRC。资产采用**稳定文件名**，使 `releases/latest/download/...` 直链永不过期。
+3. `tools/sync_github_releases.py`：`FOOTER` 由「git clone」改成下载入口表 + 3 步速通 + 完整闭环 + 教程链接；`latest` 改为按版本号自动推断（原为硬编码 v2.8.0）；新增 `LATEST_GUIDE`（最新版 Release 内的展开版教程折叠块）；新增 `--assets-dir` 幂等上传（同名资产先 DELETE 再 POST 到 `uploads.github.com`）。
+4. `README.md`：顶部 `[!TIP]` 三步速通 + 三条直链 + `License-MIT` 徽章；「快速开始」开头把零基础用户导向 INSTALL.md；方式一改为 Release 直链并说明完整包/校验和；FAQ 新增首问「我该下载哪个文件」。
+5. `docs/README.md` / `RELEASE.md` / `.gitignore` 同步；根目录安装器重新生成；`dist/` 加入 gitignore。
+
+### 关键设计决策
+
+- **稳定文件名而非带版本号文件名**：`resource-manager-full.zip` 不变，直链永远可用；版本号写进 zip 内 `VERSION.txt`。历史版本仍可用各 Release 自带的 `Source code (zip)`。
+- **zip 平铺不套外层目录**：`start.bat` 用 `%~dp0` 定位 `tools\start_helper.py`，套一层会使相对路径失效（历史踩过坑，zip 内 `START_HERE.txt` 明确提醒「必须看到 server.py 与 tools\ 并列」）。
+- **完整包也内嵌一键安装器**：`build_installer.collect()` 默认排除安装器自身，构建脚本显式写回，让下载 zip 的人也有双击入口。
+- **不打包 `state/`**：沿用同一套排除规则，用户资料与密钥绝不随发布包外泄。
+- **每个 Release 正文都带教程闭环**：Historical tag 的正文统一指向 latest 直链并注明「要本页历史版本点 Source code (zip)」，避免误导。
+
+### 自测
+
+- `python tools/build_release_assets.py`：zip 内容自检（关键文件齐全 + CRC）、资产清单与体积。
+- `python tools/smoke_test.py`：ALL PASS。
+- `python -m compileall` / `import server` / `node --check web/app.js`：通过。
+- README 链接与 Markdown 结构校验（围栏/折叠块配对、相对链接无失效）。
+- 发布后用 GitHub API 核对：资产可下载、28 个 Release 正文含下载入口、latest 指向 v2.9.0。
+
+### 下一步（若继续）
+
+Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点；或给 README 补一张实际界面截图（目前全部为文字说明）。发行链路已闭环：`build_release_assets.py` → `sync_github_releases.py --apply --assets-dir dist` 两条命令即可复现全部资产与全部 Release 正文。

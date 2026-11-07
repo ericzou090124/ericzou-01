@@ -3,6 +3,27 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.9.0] - 2026-11-07
+
+发行治理：给 GitHub Releases 补齐**可下载资产**与**零基础安装闭环**（持续迭代第 16 轮）。
+
+### 新增
+- **`docs/INSTALL.md`**（零基础唯一权威入口）：从「我该下载哪个文件」开始，覆盖准备工作 → 下载 → 双击安装 → 首次配置向导 → 刷新 / 分类 / 显式确认下载 → 全文检索与 AI 问答 → Obsidian 打开知识库 → 启动 / 停止 / 更新 / 卸载 → 10 条常见问题 → 校验和 → macOS / Linux，形成完整闭环。
+- **`tools/build_release_assets.py`**：可复现地生成 3 个 Release 资产到 `dist/`（`resource-manager-installer.bat` 一键自解压安装器、`resource-manager-full.zip` 仓库全部内容、`SHA256SUMS.txt`），zip 内注入 `START_HERE.txt` / `VERSION.txt`，构建后自动校验关键文件与 CRC。复用 `build_installer.collect()` 的排除规则，**绝不打包 `state/` / 密钥**。
+- **Release 可下载资产**：此前最新版 Release 附件为空（只有 v1.2.x 有旧包），现在最新版提供 3 个资产，且使用**稳定文件名**，因此 `releases/latest/download/...` 直链永远指向最新版。
+- **每个 Release 正文都带安装闭环**：下载入口表 + 3 步速通 + 完整使用闭环 + 教程链接；最新版额外附「展开版使用指南」折叠块（准备 / 安装 / 向导 / 闭环 / 排障），不跳链接也能照做。
+- **README 顶部下载区**：`[!TIP]` 三步速通 + 安装器 / 完整包 / 教程三条直链 + License 徽章；FAQ 新增首问「我该下载哪个文件」。
+
+### 变更
+- `tools/sync_github_releases.py`：`FOOTER` 重写为统一下载入口与安装闭环；`latest` 由硬编码改为按版本号自动推断；新增 `--assets-dir dist` 幂等上传资产（同名先删后传）。
+- 根目录 `resource-manager-installer.bat` 重新生成，纳入本轮所有文档与 `LICENSE`；`.gitignore` 忽略 `dist/`。
+- `docs/README.md` / `docs/RELEASE.md` 索引与存档说明同步到 v2.9.0。
+
+### 文档
+- 之前散落的 `新手必读.txt` / `docs/新手上手指南.md` / `docs/GUIDE.md` 保留作为补充，`INSTALL.md` 作为统一入口，避免小白在文档间迷路。
+
+---
+
 ## [v2.8.0] - 2026-11-07
 
 仓库治理：主页工程化重写 + 全版本可用性审计 + 历史补丁标签 + 功能文档（持续迭代第 15 轮）。
