@@ -49,8 +49,17 @@ def _new_connection() -> sqlite3.Connection:
 
 
 def _meta_str(x: dict) -> str:
-    return " ".join(str(x.get(k, "")) for k in
-                    ("name", "path", "folder", "group", "source", "domain", "subject", "kind", "summary"))
+    # v3.1.0：体裁 / 动态主题 / 模态也进全文索引，让 AI 检索和搜索对齐同一套规范标签
+    parts = [str(x.get(k, "")) for k in
+             ("name", "path", "folder", "group", "source", "domain", "subject", "kind",
+              "genre", "modality", "summary")]
+    for k in ("tags", "topics"):
+        v = x.get(k) or []
+        if isinstance(v, (list, tuple)):
+            parts.extend(str(t) for t in v)
+        elif v:
+            parts.append(str(v))
+    return " ".join(parts)
 
 
 def _body_clip(x: dict) -> str:

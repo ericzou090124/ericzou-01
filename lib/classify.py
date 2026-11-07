@@ -1,4 +1,9 @@
-"""分类 v3.0.0：三级主分类（单选） + 多归属主题标签 + 别名召回。
+"""分类 v3.1.0：三级主分类（单选） + 多归属主题标签 + 别名召回 + 泛化体裁/主题/模态。
+
+v3.1.0 新增 `classify_extended()`：在 v3.0.0 原有三元组之上叠加一层**内容驱动**的
+中性受控词表推断（lib/taxonomy.py）。它不区分「学生群 / 工作群」，同一套体裁词表
+服务所有场景：工作群的合同、进货单、报销单、会议纪要、法务文件不会再全落进
+「综合 / 其他资料 / 其他」。原有 `classify_full()` / `classify()` 行为完全保留。
 
 旧版的两个真实问题：
 1. 「赢家通吃」+ 泛词：高等代数词库里放了「多项式」，于是
@@ -17,6 +22,8 @@
 主分类仍返回三元组，保持老版本 / 审计脚本的兼容性。
 """
 from __future__ import annotations
+
+from . import taxonomy
 
 
 def _kw_weight(k: str) -> int:
@@ -113,6 +120,53 @@ def classify(row: dict, cfg: dict) -> tuple[str, str, str]:
     return d, s, k
 
 
+def classify_extended(row: dict, cfg: dict) -> dict:
+    """v3.1.0 融合结果：原有三级分类 + 泛化体裁 / 动态主题 / 模态 / 依据。
+
+    返回 dict 覆盖 catalog 写入所需的全部分类字段；不改动条目集合与下载状态。
+    词表默认规则层（零依赖、离线、可解释），llm_assist 显式开启且非敏感件才调模型，
+    模型失败静默回退规则层 —— 保证任何环境都能完成分类。
+    """
+    domain, subject, kind, tags = classify_full(row, cfg)
+    tcfg = (cfg.get("classification") or {}).get("taxonomy") or {}
+    inf = taxonomy.infer(row, cfg) if tcfg.get("enabled", True) else {
+        "genre": "其他资料", "topics": [], "modality": taxonomy.modality(row),
+        "confidence": 0.3, "reason": {"matched": [], "genre_scores": {}}, "engine": "off"}
+    if tcfg.get("llm_assist"):
+        inf = taxonomy.llm_enrich(row, inf, cfg)
+
+    # 旧三级词库是围绕校园课程归纳的：当它拿不到任何科目证据（subject == "综合"）时，
+    # 「其他资料 / 课件资源」这类兜底类目会吞噬工作群资料——实测销售合同、报销单、
+    # 会议纪要全落进「其他 / 综合 / 其他资料」；带 .pptx 的销售报表甚至被判成
+    # 「学习 / 课件资源」，只因为扩展名里含 "ppt"。
+    # 中性规则（不判断是学生还是职场，与场景无关）：
+    #   没有科目证据 + 内容驱动层给出明确体裁 ⇒ 用该体裁作为资源类型，领域归「综合」。
+    # 有科目证据的校园文件完全保持 v3.0.0 结果不变。
+    genre = inf["genre"]
+    long_tail = genre in ("其他资料", taxonomy.FALLBACK_GENRE)
+    if subject == "综合" and not long_tail:
+        kind = genre
+        if domain in ("学习", "其他"):
+            domain = "综合"
+
+    merged = set(tags)
+    if not long_tail:
+        merged.add(genre)
+    # 动态主题入多归属标签，但限制数量与长度，避免把噪音词变成一堆空类目
+    for tp in inf["topics"][:2]:
+        if len(tp) >= 3:
+            merged.add(tp)
+    if inf["modality"] != "其他":
+        merged.add(inf["modality"])
+    ordered = sorted(merged, key=lambda t: (-len(t), t))[:18]
+
+    return {
+        "domain": domain, "subject": subject, "kind": kind, "tags": ordered,
+        "genre": genre, "topics": inf["topics"], "modality": inf["modality"],
+        "confidence": inf["confidence"], "reason": inf["reason"], "engine": inf["engine"],
+    }
+
+
 def expand_query(q: str, cfg: dict) -> list[str]:
     """把查询词扩展为「同义 / 相关主题」候选词，用于搜索召回，避免漏项。
 
@@ -132,5 +186,11 @@ def expand_query(q: str, cfg: dict) -> list[str]:
         if q == lab or q in lab or lab in q or any(q in w or w in q for w in ws):
             terms.add(lab)
             terms.update(ws)
+    # v3.1.0：受控词表语义匹配。搜「采购单」→ 同时召回「进货单 / 供应商 / 报价单」
+    # 等同一体裁的规范词，工作群资料不会因为用词不同就搜不到。
+    tm = taxonomy.match(q, cfg)
+    if tm["canonical"]:
+        terms.update(tm["canonical"])
+        terms.update(tm["terms"][:30])
     # 长词优先，短泛词不单独作为唯一依据展示（匹配阶段仍全部参与）
     return sorted((t for t in terms if t), key=lambda t: (-len(t), t))

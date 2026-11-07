@@ -1,8 +1,8 @@
-# 新增功能详解：微信群文件监听采集 · 群文件三级自动分类
+# 新增功能详解：微信群文件监听采集 · 群文件分类 · 内容驱动泛化分类
 
-> 本文面向想理解或二次开发这两个功能的人。只想使用请读根目录 [README.md](../README.md)。
-> 实现入口：`lib/wechat_wcf.py`、`lib/classify.py`、`server.py`、`config.json`。
-> 版本基线：v2.8.0（微信适配器自 v1.5.0 引入、v1.9.0 加固；分类词库 v2.8.0 修正泛化词）。
+> 本文面向想理解或二次开发这些功能的人。只想使用请读根目录 [README.md](../README.md)。
+> 实现入口：`lib/wechat_wcf.py`、`lib/classify.py`、`lib/taxonomy.py`、`lib/catalog.py`、`server.py`、`config.json`。
+> 版本基线：v3.1.0（微信适配器自 v1.5.0 引入、v1.9.0 加固；分类词库 v2.8.0 修正泛化词；v3.0.0 修漏项；v3.1.0 增加内容驱动的泛化分类）。
 
 ---
 
@@ -295,3 +295,65 @@ start_capture(cfg, rooms, on_row)
 | `tools/test_v3.py` | 真实 HTTP 服务 **37/37 PASS**，1625 条目录零污染 |
 | 真实拉起 NapCat | 6.3s 返回 `ok / webui_online / qr_ready`；`/webui` HTTP 200 |
 | 二维码 | 本页渲染 11 KB PNG；刷新 `started=false, requested=true, qr_ready=true`，key 变化 |
+
+---
+
+## 三、v3.1.0 增补：内容驱动的泛化分类（工作群也能精细归类）
+
+### 3.1 问题不是「类目不够多」，而是「词库绑定了场景」
+
+v3.0.0 把分类修到「1625 条一条不少、高等代数 1→124 条」，但 `config.json` 的 `domains / subjects / kinds` 全部是从三个**校园课程群**归纳出来的。把一份工作群文件喂进去：
+
+| 文件 | v3.0.0 结果 |
+| --- | --- |
+| `2024年11月销售合同_补充协议.pdf` | `其他 / 综合 / 其他资料` |
+| `11月差旅费报销单_张三.xlsx` | `其他 / 综合 / 其他资料` |
+| `2024-11-05 周会会议纪要.docx` | `其他 / 综合 / 其他资料` |
+| `第三季度销售报表与业绩复盘.pptx` | **`学习 / 综合 / 课件资源`**（因为 `kinds.课件资源` 含裸关键词 `ppt`，扩展名 `.pptx` 直接命中） |
+
+这类问题的正确解法不是再堆一套「办公目录」硬编码，而是让分类由**内容 / 文档体裁**决定。
+
+### 3.2 外部成熟方案核查与取舍
+
+| 项目 | 结论 |
+| --- | --- |
+| [guiwei](https://github.com/xntj-ai/guiwei)（MIT） | 借鉴：不预设固定目录树、顶层按「模态 + 文档体裁」、vocab 别名归一、dry-run / 可撤销、三层索引、敏感件闸门 |
+| [RAG-In-A-Box](https://github.com/DevNexsler/RAG-In-A-Box) | 借鉴：Taxonomy 受控词表 + 语义匹配 + MCP 式 CRUD，让检索对齐同一套规范标签 |
+| [FolderFox](https://github.com/ChenAI-TGF/FolderFox) | 借鉴：预览方案后再执行、一键撤销 |
+| [WeChatBridge](https://github.com/freestylefly/WeChatBridge) | 借鉴：不读数据库、不注入的本地归档通道 |
+| [im-mcp](https://github.com/stkoecn/im-mcp) | **不采用**：从微信进程内存提取密钥、解密 SQLite / WCDB 聊天库，与本项目「绝不读取加密聊天数据库」的边界冲突 |
+
+只取设计思想，不引入任何运行时依赖。
+
+### 3.3 落地结构
+
+```
+文件名 / 群内文件夹 / 已下载摘要
+        │
+        ├─ taxonomy.infer()            中性受控词表：21 体裁 / 267 同义词 → genre
+        ├─ taxonomy.extract_topics()   动态主题（不预设主题表）→ topics
+        ├─ taxonomy.modality()         扩展名 → 文档/表格/演示/图片/音视频/压缩包/代码
+        └─ classify.classify_full()    v3.0.0 三元组（保留兼容）
+                   ↓ classify_extended() 融合
+        catalog: domain / subject / kind / tags / genre / topics / modality /
+                 confidence / reason / engine
+                   ↓
+        dim=genre | topic | modality | tag | classify | source  六个下钻视角
+```
+
+- **一套词表服务所有场景**：`DEFAULT_GENRES` 里没有「学生目录」「店主目录」；`detect_profile()` 只统计「校园 / 职场 / 通用」用于界面展示，源码断言 `infer()` 的 `co_names` 不含 `detect_profile`。
+- **长尾兜底**：没有体裁词命中时归中性的 `参考资料`（guiwei 的「归入文档兜底」），细粒度交给动态主题 + 模态，不猜测行业。
+- **中性纠偏**：`subject == 综合`（无科目证据）且泛化层给出明确体裁时，`kind` 改用该体裁、`domain` 归「综合」。有科目证据的校园文件完全不变。
+- **隐私闸门**：`is_sensitive()` 命中密码 / 身份证 / 银行卡等词时不送 LLM；`llm_assist` 默认 `false`，开启后模型失败静默回退规则层。
+- **可撤销**：同义词 CRUD 写 `state/taxonomy_overrides.json`（gitignore），移除即刻还原；`POST /api/taxonomy/preview` 是纯 dry-run，不写目录、不移动或改名文件。
+
+### 3.4 验证数据（v3.1.0）
+
+| 项目 | 结果 |
+| --- | --- |
+| `tools/test_taxonomy.py` | **70/70 PASS**（双场景对照 / 无场景分支 / 主题模态 / 敏感件 / CRUD / 真实目录四门禁 / 真实 HTTP） |
+| 工作群 12 份资料 | **12/12 落到 12 个不同体裁，0 份进兜底**；销售报表不再被判「学习 / 课件资源」 |
+| 真实目录重分类 | 1625 条不变、id 集合不变、下载状态不变、`verify_integrity()` OK（含 genre / modality） |
+| 分类规模 | 12 个实际体裁 / 1441 个动态主题 / 794 个多归属标签 / 7 种模态；「高等代数」召回保持 124 条 |
+| `tools/reclassify.py --dry-run` | 1625 条约 2.3s（含 jieba 词典加载），可安全原地重算 |
+| 回归链 | `smoke_test.py` ALL PASS（`[18]`）、`test_v3.py` PASS（`[F]`）、`verify_release.py` 本地与 GitHub 直链通过 |

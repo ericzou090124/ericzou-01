@@ -6,6 +6,7 @@
   B. install 的 NapCat 安装自检与配置修复
   C. 分类不漏项（高等代数召回、多归属标签、微信来源并入不删条目）
   D. 微信登录与群文件采集的可视化入口与端点
+  F. v3.1.0 泛化分类回归（体裁 / 动态主题 / 模态 / 词表 CRUD / 新页面）
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -194,6 +195,37 @@ def main() -> int:
                 check("GET " + p.split("?")[0], d.get("ok") is not False, "")
             except Exception as e:
                 check("GET " + p.split("?")[0], False, str(e))
+
+        # ---------- F. v3.1.0 泛化分类 ----------
+        print("\n[F] v3.1.0 泛化分类回归")
+        raw, ct, _ = get("/taxonomy")
+        check("GET /taxonomy 分类体系页面可用", len(raw) > 3000 and "html" in ct, f"{len(raw)} B")
+        check("页面顶部有分类体系入口", 'id="btn-taxonomy"' in
+              (config.WEB / "index.html").read_text(encoding="utf-8"))
+        snap = get("/api/taxonomy")[2]
+        check("GET /api/taxonomy 快照字段完整",
+              all(k in snap for k in ("genre_count", "alias_count", "genres",
+                                      "genre_distribution", "modality_distribution", "profile")),
+              f"{snap.get('genre_count')} 体裁 / {snap.get('alias_count')} 同义词")
+        check("快照声明不采用 im-mcp（隐私边界）",
+              any("im-mcp" in s for s in snap.get("not_adopted", [])))
+        for dim in ("genre", "topic", "modality"):
+            d = get(f"/api/tree?dim={dim}&node=%5B%5D")[2]
+            check(f"/api/tree?dim={dim} 有节点", d.get("ok") is True and len(d["children"]) > 0,
+                  f"{len(d.get('children', []))} 个")
+        stt = get("/api/state")[2]
+        check("/api/state 含 taxonomy 与 genre/topics/modalities 计数",
+              "genre_count" in (stt.get("taxonomy") or {})
+              and all(k in stt["counts"] for k in ("genres", "topics", "modalities")))
+        pv = post("/api/taxonomy/preview", {"rows": [
+            {"folder": "财务/报销", "name": "11月差旅费报销单.xlsx", "ext": ".xlsx"},
+            {"folder": "例会", "name": "周会会议纪要.docx", "ext": ".docx"}]})
+        check("dry-run 预览不写盘且给出具体体裁",
+              pv.get("dry_run") is True and all(
+                  x["genre"] in ("财务与票据", "会议与纪要") for x in pv["items"]),
+              "、".join(x["genre"] for x in pv.get("items", [])))
+        check("目录完整性（含新维度）仍通过", stt["integrity"]["ok"] is True,
+              f"missing_genre={stt['integrity'].get('missing_genre')}")
 
     finally:
         srv.shutdown()

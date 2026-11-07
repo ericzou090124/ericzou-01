@@ -37,9 +37,12 @@ REQUIRED_IN_ZIP = (
     "server.py", "config.json", "README.md", "LICENSE", "start.bat", "install.bat",
     "docs/INSTALL.md", "docs/FEATURES.md", "docs/CHANGELOG.md", "docs/DEVLOG.md",
     "tools/smoke_test.py", "tools/verify_release.py", "tools/test_v3.py",
-    "tools/setup_napcat.py", "tools/setup_napcat.bat", "tools/reclassify.py",
-    "web/index.html", "web/app.js", "web/login.html", "web/wechat.html", "web/setup.html",
+    "tools/test_taxonomy.py", "tools/setup_napcat.py", "tools/setup_napcat.bat",
+    "tools/reclassify.py",
+    "web/index.html", "web/app.js", "web/login.html", "web/wechat.html",
+    "web/setup.html", "web/taxonomy.html",
     "lib/index.py", "lib/napcat_setup.py", "lib/classify.py", "lib/catalog.py",
+    "lib/taxonomy.py", "lib/vault.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 
@@ -58,6 +61,8 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
        会自动启动本地服务，并打开浏览器到 http://127.0.0.1:8787
        第一次使用：install.bat 会自动检测并修好 NapCat 配置；点顶部「QQ 登录」
        在页面上直接扫码（不用打开任何 NapCat 控制台），再在「首次配置」勾选 QQ 群即可。
+       分类是内容驱动的：学生课程群和工作资料群都能自动精细归类；点顶部「分类体系」
+       可以查看受控词表、做学生/职场对照试跑（只预览、不改动任何文件）。
 
 【只想一键装好？】
   本压缩包里的 resource-manager-installer.bat 也可以直接双击，
@@ -84,7 +89,8 @@ VERSION_TXT = """Resource Manager {version}
   - 启动：start.bat / install.bat / install.sh / 一键登录.bat
   - 安装器：resource-manager-installer.bat（自解压，直接双击）
   - 文档：README.md / docs/（INSTALL.md 为零基础完整教程）/ CHANGELOG / DEVLOG
-  - 工具：tools/（自测、基准、全版本审计、Release 同步、发布包构建）
+  - 工具：tools/（自测、泛化分类对照自测、基准、全版本审计、Release 同步、发布包构建）
+  - 泛化分类：lib/taxonomy.py + web/taxonomy.html（中性受控词表 / 动态主题 / 模态）
 
 不包含：.git/、state/（你的本地资料与密钥）、__pycache__/、dist/
 这些目录永远不会被打包，你的数据不会被分发。

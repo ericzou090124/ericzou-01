@@ -1,15 +1,15 @@
 # Resource Manager
 
-**把 QQ / 微信群里散落的课程资料，整理成一个可检索、可问答的本地 Obsidian 知识库**
+**把 QQ / 微信群里散落的课程资料、合同单据与工作文件，整理成一个可检索、可问答的本地 Obsidian 知识库**
 
-`群文件采集` · `三级自动分类` · `微信监听式收集` · `SQLite FTS5 全文检索` · `AI 防臆造问答` · `Obsidian 多级大纲` · `零第三方硬依赖`
+`群文件采集` · `内容驱动泛化分类` · `微信监听式收集` · `SQLite FTS5 全文检索` · `AI 防臆造问答` · `Obsidian 多级大纲` · `零第三方硬依赖`
 
 [![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Deps](https://img.shields.io/badge/Deps-Zero_hard_dependency-00ADD8?style=flat-square)](requirements.txt)
 [![Search](https://img.shields.io/badge/Search-SQLite_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](lib/index.py)
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
-[![Version](https://img.shields.io/badge/Version-v3.0.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v3.1.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-2E8B57?style=flat-square)](LICENSE)
 
 ---
@@ -43,7 +43,9 @@
 - **本地模型或外部 API 都行**：默认指向本机推理服务（Bonsai2，自动 `disable_thinking`），也可切任意 OpenAI 兼容接口；模型挂了自动降级为纯本地检索，不编造答案。
 - **Obsidian 独立新库**：自动在桌面生成 `资源管理/` 独立 Obsidian 库（带多级大纲 MOC 与 AI 侧边栏插件），**不碰你原有的任何笔记库**。
 
-实测数据：3 个 QQ 群、1641 条原始清单去重后 **1625 条 / 约 12.73 GB**，覆盖 8 个领域、29 个具体科目、8 类资源、55 个多归属主题标签。分类升级后**条目一条不少**（`catalog.verify_integrity()` 门禁）。
+实测数据：3 个 QQ 群、1641 条原始清单去重后 **1625 条 / 约 12.73 GB**，覆盖 9 个领域、29 个具体科目、12 个规范体裁、1441 个动态主题、794 个多归属主题标签。分类升级后**条目一条不少**（`catalog.verify_integrity()` 门禁）。
+
+> **v3.1.0 起分类不再挑场景**：不是「学生群用校园目录、工作群用办公目录」两套硬编码，而是一套中性受控词表 + 动态主题提取。把工作群的合同、进货单、报销单、会议纪要、法务文件放进来，会分别落到对应体裁，不会全挤进「综合 / 其他资料」。详见 [内容驱动的泛化分类](#-内容驱动的泛化分类)。
 
 ---
 
@@ -53,7 +55,8 @@
 | --- | --- |
 | 📥 **QQ 群文件只读盘点** | 通过本机 NapCat（OneBot 11）`get_group_root_files` + `get_group_files_by_folder` **递归遍历全部目录**，只取元数据；接口掉线自动收紧为「离线快照」并锁定下载，恢复在线需用户显式点「刷新来源」 |
 | 🧠 **群文件三级自动分类 + 多归属标签** | `领域 → 科目/主题 → 资源类型` 三层归类，词库全部在 `config.json`（8 领域 / 29 科目 / 8 类型 + 14 组相关主题别名）；关键词按长度加权避免泛词误判，另生成**多归属主题标签**，「按主题标签」视图里同一文件会在多个节点出现，**绝不藏文件**；详见 [群文件自动分类](#-群文件自动分类) |
-| 🔎 **别名召回，不再漏项** | 搜索词自动按同义/相关主题展开：实测搜「高等代数」从旧版 **1 条 → 124 条**（线性代数、矩阵、行列式、多项式等全部召回）；`verify_integrity()` 保证条目数/id/标签不缺失 |
+| 🧬 **内容驱动的泛化分类（v3.1.0）** | **同一套中性受控词表服务所有场景**：21 个规范体裁 / 267 个同义词（合同、财务、采购、会议、方案、人事、客户、法务、课程、试题…），主题词从群内文件夹与文件名**动态提取**，模态按扩展名识别；不硬编码「学生用 A 目录 / 店主用 B 目录」；工作群资料实测 **12/12 落到具体体裁**，不会全进「其他资料」；顶部「分类体系」页可对照试跑（dry-run，只预览不写盘）+ 词表 CRUD；详见 [内容驱动的泛化分类](#-内容驱动的泛化分类) |
+| 🔎 **别名召回，不再漏项** | 搜索词同时按 `classification.aliases` 与受控词表语义匹配展开：实测搜「高等代数」从旧版 **1 条 → 124 条**；`verify_integrity()` 保证条目数 / id / 标签 / 体裁 / 模态不缺失 |
 | 💬 **微信群文件监听采集** | 基于 GitHub 成熟方案 **WeChatFerry** 的监听式适配器，只接收你**指定群**内的文件/附件消息，5 秒防抖并入目录；**界面顶部「微信」按钮直达登录/群清单/监听页面**，一键启用、安装、检测，不用手改配置；默认关闭、绝不读加密库；详见 [微信监听与收集](#-微信监听与收集) |
 | 🔑 **QQ 登录本页闭环** | 二维码在资源管理器自己的页面直出、过期自动换新，「刷新二维码」会自动拉起未运行的 NapCat；**不需要打开任何 NapCat 控制台**，登录成功自动恢复在线来源 |
 | 🛠️ **install 真的管 NapCat** | `install.bat` 内置 NapCat 安装自检：检测运行时 / 启动脚本 / WebUI / OneBot 配置，自动修复 `webui.json` 的 `host=::`（本机 127.0.0.1 拒绝连接的根因）并生成可回滚备份与 `state/napcat_setup.json` 报告；也可单独跑 `tools/setup_napcat.bat` |
@@ -94,6 +97,31 @@
 </details>
 
 > 词库可按自己的课程表调整：`config.json → classification` 的 `domains / subjects / kinds / aliases`。改完执行 `python tools/reclassify.py`（自动备份 + 四道完整性门禁）原地重算，或 `POST /api/reclassify`；`--dry-run` 可先预览。`tools/version_audit.py` 会拿代表性文件名回归验证分类词库是否失效。
+
+---
+
+## 🧬 内容驱动的泛化分类（v3.1.0）
+
+上面那套三级词库是从**校园课程群**归纳出来的。如果用户换成一个工作群（合同、进货单、报销单、会议纪要、法务文件、客户报表），它会把所有东西判成「其他 / 综合 / 其他资料」——这是真实缺陷，不是理论风险。v3.1.0 增加了一层**与场景无关**的分类：
+
+| 维度 | 字段 | 怎么来的 |
+| --- | --- | --- |
+| **规范体裁** `genre` | 21 个中性体裁：`合同与协议`、`财务与票据`、`采购与供应`、`会议与纪要`、`方案与规划`、`报告与总结`、`通知与公告`、`人事与行政`、`客户与销售`、`产品与需求`、`法务与合规`、`培训与资料`、`数据与报表`、`课程与教学`、`试题与考核`、`科研与文献`、`项目与任务`、`素材与媒体`、`代码与工程`、`生活与事务`、`参考资料`（长尾兜底） | 受控词表按别名长度加权打分；**只有一套词表，学生群 / 工作群 / 任何群共用** |
+| **动态主题** `topics` | 1441 个（真实目录） | 从群内文件夹路径、文件名括号、已下载正文摘要**实时提取**；不预设主题表，所以「华南区客户」「智慧门店」「高等代数」都能成为主题 |
+| **文件模态** `modality` | 文档 / 表格 / 演示 / 图片 / 音视频 / 压缩包 / 代码 | 只看扩展名，不读未下载文件的云端内容 |
+| **依据与置信度** | `reason.matched` / `genre_scores` / `confidence` / `engine` | 规则层可解释；`llm_assist` 显式开启且非敏感件才调模型，失败静默回退规则层 |
+
+**关键约束：分类逻辑是内容驱动的，代码里没有「学生用 A 目录 / 店主用 B 目录」的分支。** `detect_profile()` 只统计「校园 / 职场 / 通用」的分布用于界面展示，**从不参与分类**；`tools/test_taxonomy.py` 会把同一批工作群文件在校园资料前后各跑一遍，断言结果逐字节一致（无隐藏场景状态）。
+
+**结果（真实对照自测，12 份工作群文件）**：销售合同 → 合同与协议、差旅费报销单 → 财务与票据、供应商进货单 → 采购与供应、周会纪要 → 会议与纪要、NDA → 法务与合规、员工手册 → 人事与行政、PRD → 产品与需求、里程碑排期 → 项目与任务、销售报表 → 客户与销售、放假通知 → 通知与公告、指标看板 → 数据与报表、接口文档 → 代码与工程，**0 份落进长尾兜底**。同时旧三级词库把 `.pptx` 销售报表误判成「学习 / 课件资源」的问题也一并纠偏：无科目证据时以内容驱动体裁为准。
+
+**可撤销 / 先看再执行**：`GET /taxonomy` 页面提供
+- 双场景对照 dry-run（`POST /api/taxonomy/preview`，只推断、不写目录、不移动或改名文件）；
+- 受控词表同义词 CRUD（`POST /api/taxonomy/synonym`，写 `state/taxonomy_overrides.json`，不进仓库，可随时移除）；
+- 语义匹配自检（`GET /api/taxonomy?q=进货单`）；
+- 主界面新增「按体裁 / 按动态主题 / 按文件模态」三个下钻维度，默认视图改为「按体裁（内容驱动）」。
+
+**技术来源**：借鉴 [guiwei](https://github.com/xntj-ai/guiwei)（MIT，不预设目录树 + 模态/体裁 + vocab 归一 + dry-run/可撤销 + 敏感件闸门）、[RAG-In-A-Box](https://github.com/DevNexsler/RAG-In-A-Box)（Taxonomy 受控词表 + 语义匹配 + CRUD）、[FolderFox](https://github.com/ChenAI-TGF/FolderFox)（预览再执行）、[WeChatBridge](https://github.com/freestylefly/WeChatBridge)（不读库不注入的本地归档通道）的**设计思想**，零运行时依赖。**不采用** [im-mcp](https://github.com/stkoecn/im-mcp)：它需从微信进程内存提取密钥并解密 SQLite 聊天库，与本项目「绝不读取加密聊天数据库」的边界冲突。
 
 ---
 
@@ -222,7 +250,10 @@ python server.py
 ### 方式三：只跑验证（不启动服务）
 
 ```bash
-python tools/smoke_test.py        # 16 项单元 + HTTP 集成回归，退出码 0 即通过
+python tools/smoke_test.py        # 18 项单元 + HTTP 集成回归，退出码 0 即通过
+python tools/test_v3.py           # v3.0.0 端到端自测（真实 HTTP）+ v3.1.0 泛化回归
+python tools/test_taxonomy.py     # 泛化分类双场景对照自测 70 项（学生群 / 工作群）
+python tools/verify_release.py    # 发行资产端到端验证（可加 --from-github）
 python tools/bench.py             # 索引 rebuild / sync / optimize 微基准
 python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSION_AUDIT.md
 ```
@@ -248,7 +279,8 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | `sources.qq.enabled` / `.groups` | `true` / 3 个示例群 | 群代号 → `{display, qq_group}`；群号必须是纯数字 |
 | `sources.wechat.wcf.enabled` | `false` | 微信监听总开关，**默认关闭** |
 | `sources.wechat.wcf.host/port` | `127.0.0.1:10086` | WeChatFerry RPC 地址 |
-| `classification` | 6 领域 / 23 科目 / 6 类型 | 三级分类词库，可自由增删 |
+| `classification` | 8 领域 / 29 科目 / 8 类型 / 14 组别名 | 三级分类词库，可自由增删 |
+| `classification.taxonomy` | `enabled=true` / `llm_assist=false` / `max_topics=4` | 泛化分类开关：中性受控词表在 `lib/taxonomy.py`；用户新增同义词写 `state/taxonomy_overrides.json`（不进仓库）；敏感件关键词永不送模型 |
 | `allowed_ext` | 17 种 | 下载白名单（带点，如 `.pdf`）；为空时所有下载被拒绝 |
 | `max_download_per_batch` | `30` | 单批下载上限，超出部分需再次确认 |
 | `max_chars_per_file` | `60000` | 单文件入索引的正文截断长度 |
@@ -319,7 +351,7 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | `/api/health` | GET | `ok` / 索引篇数 / 来源模式 / QQ 在线状态 |
 | `/api/diagnose` | GET | 配置自检 + 错误/提醒 + 运行态 |
 | `/api/state` | GET | 完整状态：来源、统计、微信、设置、下载上限 |
-| `/api/tree` | GET | 分类/来源树子节点（份数、已下载数、体积） |
+| `/api/tree` | GET | `dim=classify / source / tag / genre / topic / modality` 六种视角的树子节点（份数、已下载数、体积） |
 | `/api/files` | GET | 节点内文件列表，支持 `q` 搜索、`kind` 筛选、`limit`，返回 `total` |
 | `/api/file` | GET | 单文件详情 + 正文摘录 + 资产/笔记绝对路径 |
 | `/api/outline` | GET | Obsidian 大纲信息 |
@@ -350,7 +382,11 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | `/api/qqlogin/status` · `/refresh` · `/quick` · `/restore` | GET / POST | 本页二维码状态 / 刷新（自动拉起 NapCat）/ 免扫码快登 / 扫码后恢复在线 |
 | `/api/napcat/status` · `/start` · `/setup` | GET / POST | NapCat 完整自检 / 拉起服务 / **安装自检并自动修复配置** |
 | `/api/qq/groups` | GET | 列出本机 QQ 已加入的群 |
-| `/api/reclassify` | POST | 词库升级后原地重算分类（不增删条目，带完整性门禁） |
+| `/api/reclassify` | POST | 词库升级后原地重算分类（不增删条目，带完整性门禁）；返回体裁分布与场景统计 |
+| `/api/taxonomy` | GET | 受控词表快照：`genres` / 同义词 / 体裁与模态分布 / 场景统计 / 技术来源；`?q=` 附带语义匹配 |
+| `/api/taxonomy/preview` | POST | FolderFox 式 dry-run：给若干 `{folder, name}` 预览推断结果，**不写目录** |
+| `/api/taxonomy/synonym` | POST | 词表 CRUD：新增/移除同义词（写 `state/`，可撤销），可选 `reclassify` 原地重算 |
+| `/taxonomy` | GET | 分类体系页面：对照试跑、词表管理、语义匹配、边界说明 |
 | `/api/wechat/wcf/status` | GET | 微信适配器状态（enabled / available / login / capturing / captured / saved_rooms / login_hint） |
 | `/api/wechat/wcf/enable` · `/install` · `/login` | POST | 一键启用 / 安装 wcferry / 检测微信登录态 |
 | `/api/wechat/wcf/rooms` · `/rooms/save` | GET / POST | 发现群 / 保存监听群清单 |
@@ -379,6 +415,7 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | `v2.8.0` | 主页重写、全版本可用性审计、历史补丁标签、文档与 Release 治理 |
 | `v2.9.0` ~ `v2.9.1` | 小白下载入口与完整教程闭环、可下载 Release 资产、一键安装器 cmd 解析故障修复 |
 | `v3.0.0` | **登录/安装/分类/微信四条链路实测修复**：NapCat 控制台入口移除与二维码本页直出、install 真正安装配置 NapCat、分类不漏项（高等代数 1→124 条）、微信登录与群文件采集可视化入口 |
+| `v3.1.0` | **内容驱动的泛化分类**：中性受控词表（21 体裁 / 267 同义词）+ 动态主题 + 模态、工作群双场景对照自测 70/70、dry-run 预览与词表 CRUD 页面、三个新下钻维度；借鉴 guiwei / RAG-In-A-Box / FolderFox / WeChatBridge，明确不采用 im-mcp |
 
 ### 全版本可用性审计
 
@@ -474,7 +511,12 @@ python tools/smoke_test.py     # 验证
 | 下载必须显式确认 / 整类二次确认 / 单批上限 | `lib/download.py::precheck` |
 | 下载失败退避重试、永久错误不重试 | `lib/download.py::_fetch_with_retry` |
 | 下载后只做增量同步而非全量重建 | `lib/download.py::run` → `index.sync()` |
-| 三级分类加权打分（文件夹权重更高） | `lib/classify.py::classify` |
+| 三级分类加权打分（文件夹权重更高） | `lib/classify.py::classify_full` |
+| 内容驱动泛化分类（不硬编码场景目录） | `lib/taxonomy.py::infer` / `lib/classify.py::classify_extended` |
+| 动态主题提取（不预设主题表） | `lib/taxonomy.py::extract_topics` |
+| 敏感件不送 LLM / 规则层兜底 | `lib/taxonomy.py::is_sensitive` / `llm_enrich` |
+| 词表 CRUD 可撤销（写 state，不进仓库） | `lib/taxonomy.py::save_synonym` |
+| 分类完整性门禁（含体裁 / 模态） | `lib/catalog.py::verify_integrity` |
 | 微信监听群清单为空则拒绝启动 | `lib/wechat_wcf.py::start_capture` |
 | 微信采集 5 秒防抖 + 增量索引 | `server.py::wechat_on_row` / `wechat_flush` |
 | 命中判定与生成解耦、未下载标注 | `lib/ai.py::answer` / `SYSTEM` |
@@ -506,5 +548,9 @@ python tools/smoke_test.py     # 验证
 
 - [NapCatQQ](https://github.com/NapCatQQ/NapCatQQ) — QQ OneBot 11 接入
 - [WeChatFerry](https://github.com/lich0821/WeChatFerry) — 微信群文件监听方案（`lib/wechat_wcf.py`）
+- [guiwei](https://github.com/xntj-ai/guiwei)（MIT）— 内容驱动分类、模态/体裁、vocab 归一、dry-run 与敏感件闸门
+- [RAG-In-A-Box](https://github.com/DevNexsler/RAG-In-A-Box) — Taxonomy 受控词表、语义匹配与 CRUD
+- [FolderFox](https://github.com/ChenAI-TGF/FolderFox) — 预览方案后再执行、可撤销
+- [WeChatBridge](https://github.com/freestylefly/WeChatBridge) — 不读库、不注入的本地归档通道
 - [Obsidian](https://obsidian.md) — 知识库载体与插件接口
 - README 的文档结构与工程化排版参考了 [workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel)

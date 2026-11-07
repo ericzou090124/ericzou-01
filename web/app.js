@@ -11,7 +11,7 @@ function hl(text) {
   try { return safe.replace(new RegExp('(' + pat + ')', 'gi'), '<mark>$1</mark>'); }
   catch (e) { return safe; }
 }
-const state = { dim: 'classify', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [] };
+const state = { dim: 'genre', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [] };
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -61,13 +61,18 @@ async function loadState() {
     <div style="padding-top:6px">微信通道基于 WeChatFerry 监听你勾选群里的文件消息：
     需微信 PC 3.9.x 登录 + 本地 RPC 10086；历史群文件与加密聊天库不可读、不读取。
     ${esc(w.reason || '')}<br>${Object.values(w.limits || {}).map(x => '· ' + esc(x)).join('<br>')}</div></details>`;
-  const c = d.counts, ig = d.integrity || {};
+  const c = d.counts, ig = d.integrity || {}, tax = d.taxonomy || {};
   $('#stats').innerHTML = `<div>授权可见 <b>${c.total}</b> 份</div>
     <div>已下载 <b>${c.downloaded}</b> · 仅元数据 <b>${c.metadata_only}</b></div>
-    <div>${c.domains} 个领域 / ${c.subjects} 个科目 / ${c.tags || 0} 个主题标签</div>
+    <div><b>${c.genres || 0}</b> 个规范体裁 · <b>${c.topics || 0}</b> 个动态主题 · ${c.modalities || 0} 种模态</div>
+    <div>覆盖体裁 <b>${c.genre_covered || 0}</b> 份 · 长尾兜底 ${c.genre_other || 0} 份 · ${c.tags || 0} 个多归属标签</div>
+    <div class="muted mini">词表 ${tax.genre_count || 0} 个体裁 / ${tax.alias_count || 0} 个同义词 · 场景倾向 ${esc((tax.profile || {}).profile || '-')}（仅统计，不参与分类）</div>
     <div class="${ig.ok === false ? 'bad' : 'muted'}">${ig.ok === false ? '⚠ 分类完整性校验异常' : '分类完整 · 无缺项漏项 ✓'}</div>
     <div class="muted">合计约 ${(c.size_bytes/1024/1024/1024).toFixed(2)} GB</div>
-    <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>`;
+    <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>
+    <button class="btn small" id="sb-taxonomy" style="width:100%;margin-top:6px">打开分类体系 / 对照试跑</button>`;
+  const stx = $('#sb-taxonomy');
+  if (stx) stx.onclick = () => window.open('/taxonomy', '_blank');
 }
 
 function renderCrumb() {
@@ -138,7 +143,8 @@ function renderFiles() {
     <div class="file">
       <input type="checkbox" data-id="${esc(x.id)}" ${state.selected.has(x.id) ? 'checked' : ''} ${x.downloaded ? 'disabled' : ''}>
       <div class="name">${hl(x.name)}
-        <div class="meta">${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}${(x.tags || []).length ? ' · 标签：' + hl((x.tags || []).slice(0, 4).join(' / ')) : ''}</div>
+        <div class="meta">体裁 ${hl(x.genre || '参考资料')} · 主题 ${hl((x.topics || []).slice(0, 3).join(' / ') || '—')} · ${esc(x.modality || '')} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}</div>
+        <div class="meta">旧三级 ${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)}${(x.tags || []).length ? ' · 标签：' + hl((x.tags || []).slice(0, 4).join(' / ')) : ''}</div>
       </div>
       <span class="link" data-id="${esc(x.id)}">预览</span>
     </div>`).join('');
@@ -157,7 +163,9 @@ async function showPreview(id) {
     <div style="font-weight:600;margin-bottom:6px">${esc(x.name)}</div>
     <div class="muted" style="line-height:1.8">
       来源：${esc(x.source)} / ${esc(x.group)}<br>
-      分类：${esc(x.domain)} › ${esc(x.subject)} › ${esc(x.kind)}<br>
+      <b>泛化分类</b>：${esc(x.genre || '参考资料')} › ${(x.topics || []).slice(0, 4).map(esc).join(' / ') || '—'} › ${esc(x.modality || '其他')}<br>
+      <span class="mini">依据：${esc((x.reason && x.reason.matched || []).slice(0, 5).join('、') || '无体裁词命中，长尾兜底')} · 引擎 ${esc(x.engine || 'rules')} · 置信度 ${esc(x.confidence ?? '—')}</span><br>
+      旧三级分类：${esc(x.domain)} › ${esc(x.subject)} › ${esc(x.kind)}<br>
       主题标签：${(x.tags || []).map(esc).join(' / ') || '（无）'}<br>
       群内路径：${esc(x.path)}<br>
       体积：${esc(x.size)} · 上传：${esc(x.uploaded_at || '未知')}<br>
@@ -266,6 +274,7 @@ function settingsModal() {
 
 $('#btn-login').onclick = () => window.open('/login', '_blank');
 $('#btn-wechat').onclick = () => window.open('/wechat', '_blank');
+$('#btn-taxonomy').onclick = () => window.open('/taxonomy', '_blank');
 $('#btn-setup').onclick = () => { window.location.href = '/setup'; };
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';

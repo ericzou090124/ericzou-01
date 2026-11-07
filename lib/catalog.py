@@ -22,10 +22,15 @@ DIMS = {
     "classify": ["domain", "subject", "kind"],
     "source": ["source", "group", "folder"],
     "tag": ["tags"],  # 维度名叫 tag，实际字段是复数 tags（多值）
+    # v3.1.0 泛化维度：中性体裁 → 模态；动态主题（多值）；模态 → 体裁
+    "genre": ["genre", "modality"],
+    "topic": ["topics"],
+    "modality": ["modality", "genre"],
 }
 
-# 参与搜索的字段；tags 为多值列表，_hay() 会自动展开
-_SEARCH_FIELDS = ("name", "path", "folder", "group", "domain", "subject", "kind", "summary", "tags")
+# 参与搜索的字段；tags/topics 为多值列表，_hay() 会自动展开
+_SEARCH_FIELDS = ("name", "path", "folder", "group", "domain", "subject", "kind", "summary",
+                  "tags", "genre", "topics", "modality")
 
 _CACHE: dict[str, tuple] = {}  # path -> (mtime_ns, size, data)
 
@@ -44,7 +49,7 @@ def load() -> dict:
             return cached[1]
     except OSError:
         pass
-    data = config.read_json(p, {"version": 2, "updated_at": "", "items": []})
+    data = config.read_json(p, {"version": 3, "updated_at": "", "items": []})
     try:
         st = p.stat()
         _CACHE[str(p)] = ((st.st_mtime_ns, st.st_size), data)
@@ -54,7 +59,7 @@ def load() -> dict:
 
 
 def save(cat: dict) -> None:
-    cat["version"] = 2
+    cat["version"] = 3
     cat["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     config.write_json(config.state("catalog.json"), cat)
     _CACHE.pop(str(config.state("catalog.json")), None)
@@ -83,8 +88,9 @@ def upsert_manifest(cat: dict, rows: list[dict], cfg: dict,
         group = r.get("group") or "未知群"
         rid = r.get("id") or make_id(source, group, r["path"])
         seen.add(rid)
-        dom, subj, kind, tags = classify.classify_full(r, cfg)
         old = index.get(rid) or {}
+        # 已下载正文摘要参与推断，让「内容驱动」不只依赖文件名；未下载文件没有正文可送
+        cls = classify.classify_extended({**r, "summary": old.get("summary", "")}, cfg)
         rec = {
             "id": rid, "source": source, "group": group,
             "group_id": r.get("group_id", ""), "path": r["path"], "name": r["name"],
@@ -92,7 +98,8 @@ def upsert_manifest(cat: dict, rows: list[dict], cfg: dict,
             "size_bytes": r.get("size_bytes", 0), "size": r.get("size") or qq.fmt_size(r.get("size_bytes", 0)),
             "uploader": r.get("uploader", ""), "uploaded_at": r.get("uploaded_at", ""),
             "file_id": r.get("file_id", ""), "busid": r.get("busid", 102),
-            "domain": dom, "subject": subj, "kind": kind, "tags": tags,
+            **{k: cls[k] for k in ("domain", "subject", "kind", "tags", "genre", "topics",
+                                    "modality", "confidence", "reason", "engine")},
             "downloaded": bool(old.get("downloaded")),
             "asset": old.get("asset", ""), "note": old.get("note", ""),
             "summary": old.get("summary", ""), "extract_status": old.get("extract_status", ""),
@@ -113,8 +120,9 @@ def reclassify(cat: dict, cfg: dict) -> int:
     """只重算分类字段，绝不动条目集合 / 下载状态。用于词库升级后的原地迁移。"""
     n = 0
     for x in items(cat):
-        d, s, k, tags = classify.classify_full(x, cfg)
-        x.update({"domain": d, "subject": s, "kind": k, "tags": tags})
+        cls = classify.classify_extended(x, cfg)
+        x.update({k: cls[k] for k in ("domain", "subject", "kind", "tags", "genre", "topics",
+                                      "modality", "confidence", "reason", "engine")})
         n += 1
     return n
 
@@ -123,10 +131,12 @@ def public(x: dict) -> dict:
     """前端可见字段：绝不下发 file_id / 令牌 / 本地缓存绝对路径。"""
     keys = ("id", "source", "group", "path", "name", "folder", "ext", "size", "size_bytes",
             "uploader", "uploaded_at", "domain", "subject", "kind", "tags", "downloaded",
-            "asset", "note", "summary", "extract_status", "body_chars")
+            "asset", "note", "summary", "extract_status", "body_chars",
+            "genre", "topics", "modality", "confidence", "reason", "engine")
     out = {k: x.get(k, "") for k in keys}
-    if not isinstance(out.get("tags"), list):
-        out["tags"] = []
+    for k in ("tags", "topics"):
+        if not isinstance(out.get(k), list):
+            out[k] = []
     return out
 
 
@@ -203,6 +213,10 @@ def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200,
 def counts(cat: dict) -> dict:
     xs = items(cat)
     tagset = {t for x in xs for t in (x.get("tags") or []) if t}
+    topicset = {t for x in xs for t in (x.get("topics") or []) if t}
+    genre_set = {str(x.get("genre") or "") for x in xs}
+    other_genres = sum(1 for x in xs if str(x.get("genre") or "") in
+                       ("", "其他资料", "参考资料"))
     return {
         "total": len(xs),
         "downloaded": sum(1 for x in xs if x.get("downloaded")),
@@ -212,19 +226,32 @@ def counts(cat: dict) -> dict:
         "subjects": len({x.get("subject") for x in xs}),
         "tags": len(tagset),
         "tagged": sum(1 for x in xs if x.get("tags")),
+        "genres": len(genre_set),
+        "topics": len(topicset),
+        "modalities": len({str(x.get("modality") or "") for x in xs}),
+        "genre_covered": len(xs) - other_genres,
+        "genre_other": other_genres,
     }
 
 
 def verify_integrity(cat: dict) -> dict:
-    """完整性门禁：条目数、id 唯一、每条都有主分类与标签。用于自测与刷新后校验。"""
+    """完整性门禁：条目数、id 唯一、每条都有主分类/标签/体裁/模态。
+
+    「分类后缺项漏项」是用户明确反馈过的问题，所以这里把 v3.1.0 新维度也纳入门禁：
+    每条记录都必须有可浏览的 genre 与 modality，否则视为分类不完整。
+    """
     xs = items(cat)
     ids = [x.get("id") for x in xs]
-    missing_class = [x["id"] for x in xs
+    missing_class = [x.get("id") for x in xs
                      if not all(str(x.get(k, "") or "") for k in ("domain", "subject", "kind"))]
-    missing_tags = [x["id"] for x in xs if not x.get("tags")]
+    missing_tags = [x.get("id") for x in xs if not x.get("tags")]
+    missing_genre = [x.get("id") for x in xs if not str(x.get("genre") or "")]
+    missing_modality = [x.get("id") for x in xs if not str(x.get("modality") or "")]
     return {
-        "ok": len(ids) == len(set(ids)) and not missing_class and not missing_tags,
+        "ok": (len(ids) == len(set(ids)) and not missing_class and not missing_tags
+               and not missing_genre and not missing_modality),
         "total": len(xs), "unique_ids": len(ids) == len(set(ids)),
         "missing_class": len(missing_class), "missing_tags": len(missing_tags),
+        "missing_genre": len(missing_genre), "missing_modality": len(missing_modality),
         "tagged": sum(1 for x in xs if x.get("tags")),
     }

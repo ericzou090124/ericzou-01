@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (ai, catalog, config, config_validate, download, index, llm, napcat_launch,  # noqa: E402
-                 napcat_setup, qq, qqlogin, vault, wechat, wechat_wcf)
+                 napcat_setup, qq, qqlogin, taxonomy, vault, wechat, wechat_wcf)
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -183,6 +183,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file("setup.html")
             if p == "/wechat":
                 return self._file("wechat.html")
+            if p == "/taxonomy":
+                return self._file("taxonomy.html")
+            if p == "/api/taxonomy":
+                # 受控词表快照（只读）。?q= 时附带语义匹配结果，不写任何数据。
+                cat = ensure()
+                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
+                q = (q.get("q", [""])[0] or "").strip()
+                if q:
+                    snap["match"] = taxonomy.match(q, config.CFG)
+                return self._send(snap)
             if p == "/api/setup":
                 return self._send(setup_status())
             if p == "/api/qq/groups":
@@ -211,6 +221,10 @@ class Handler(BaseHTTPRequestHandler):
                 d["vault"] = str(config.vault())
                 d["napcat"] = napcat_setup.status()
                 d["wechat"] = wechat_wcf.status(config.CFG)
+                d["taxonomy"] = {"enabled": bool(((config.CFG.get("classification") or {})
+                                                   .get("taxonomy") or {}).get("enabled", True)),
+                                 "genres": len(taxonomy.genres(config.CFG)),
+                                 "llm_assist": bool(taxonomy.snapshot([], config.CFG)["llm_assist"])}
                 return self._send({"ok": True, **d})
             if p == "/api/health":
                 # _sync_source() 已在请求开头实时探活；这里用状态缓存，
@@ -223,8 +237,14 @@ class Handler(BaseHTTPRequestHandler):
                 wstatus = wechat.status(config.CFG)
                 wstatus["wcf"] = wechat_wcf.status(config.CFG)
                 wstatus["capturing"] = wechat_wcf.is_capturing()
+                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
                 return self._send({"ok": True, "source": SOURCE_STATUS, "counts": catalog.counts(cat),
                                    "integrity": catalog.verify_integrity(cat),
+                                   "taxonomy": {"genre_count": snap["genre_count"],
+                                                "alias_count": snap["alias_count"],
+                                                "top_genres": dict(list(snap["genre_distribution"].items())[:8]),
+                                                "profile": snap["profile"],
+                                                "llm_assist": snap["llm_assist"]},
                                    "wechat": wstatus, "wcf": wstatus["wcf"],
                                    "settings": config.public_settings(),
                                    "download_cap": config.CFG.get("max_download_per_batch", 30)})
@@ -381,8 +401,31 @@ class Handler(BaseHTTPRequestHandler):
                 if len(catalog.items(cat)) != before or not v["ok"]:
                     return self._send({"ok": False, "error": "重算后完整性校验失败，请检查目录",
                                        "integrity": v}, 500)
+                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
                 return self._send({"ok": True, "items": n, "counts": catalog.counts(cat),
-                                   "integrity": v, "outlines": vault.build_outlines(cat)})
+                                   "integrity": v, "outlines": vault.build_outlines(cat),
+                                   "taxonomy": {"genre_count": snap["genre_count"],
+                                                "profile": snap["profile"],
+                                                "top_genres": dict(list(snap["genre_distribution"].items())[:8])}})
+            if p == "/api/taxonomy/preview":
+                # FolderFox / guiwei 式 dry-run：只推断，不写目录、不移动/改名任何文件
+                return self._send(taxonomy.preview(body.get("rows") or [], config.CFG))
+            if p == "/api/taxonomy/synonym":
+                # 受控词表 CRUD，写 state/taxonomy_overrides.json（不进仓库，可撤销）
+                r = taxonomy.save_synonym(str(body.get("genre") or ""),
+                                          str(body.get("word") or ""),
+                                          str(body.get("action") or "add"), config.CFG)
+                if r.get("ok") and body.get("reclassify"):
+                    cat = ensure()
+                    before = len(catalog.items(cat))
+                    n = catalog.reclassify(cat, config.CFG)
+                    catalog.save(cat)
+                    index.sync(cat)
+                    iv = catalog.verify_integrity(cat)
+                    r["reclassified"] = n
+                    r["integrity"] = iv
+                    r["items_unchanged"] = len(catalog.items(cat)) == before
+                return self._send(r)
             if p == "/api/maintain":
                 return self._send(index.optimize())
             if p == "/api/init":

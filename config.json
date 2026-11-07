@@ -738,6 +738,22 @@
         "学分",
         "课表"
       ]
+    },
+    "taxonomy": {
+      "enabled": true,
+      "llm_assist": false,
+      "max_topics": 4,
+      "sensitive_keywords": [
+        "密码",
+        "密钥",
+        "身份证",
+        "银行卡",
+        "私钥",
+        "口令",
+        "凭据",
+        "体检报告"
+      ],
+      "note": "内容驱动的泛化分类：中性受控词表在 lib/taxonomy.py（不绑定行业，不预设「学生/店主」目录）；主题词从文件名与群内路径动态提取。用户新增/删除同义词写 state/taxonomy_overrides.json，不进仓库、可随时回退。设计参考 guiwei / RAG-In-A-Box / FolderFox / WeChatBridge；不采用 im-mcp（需解密微信聊天库）。"
     }
   },
   "ai": {

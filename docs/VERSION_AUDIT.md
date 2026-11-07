@@ -7,8 +7,8 @@
 
 ## 汇总
 
-- 审计版本数：**29**
-- 通过：**25**
+- 审计版本数：**30**
+- 通过：**26**
 - 已知历史问题（已提供补丁标签）：**4**
 - 未修复失败：**0**
 
@@ -62,6 +62,7 @@
 | `v2.8.0` | ✅ PASS | `b99cb415b4` | 27 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `v2.9.0` | ✅ PASS | `4bf5f46365` | 29 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `v2.9.1` | ✅ PASS | `5b817da593` | 30 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `v3.0.0` | ✅ PASS | `a05fb31060` | 34 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 明细与异常
 
@@ -122,7 +123,7 @@
 - ❌ 核心链路失败: Traceback (most recent call last):
   File "<string>", line 30, in <module>
     r0 = ai.answer("", cat)
-  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_3_0_f4vdwn7a\lib\ai.py", line 164, in answer
+  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_3_0_wjopeq81\lib\ai.py", line 164, in answer
     return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": 0}
                                                                                            
 
@@ -141,7 +142,7 @@
 - ❌ 核心链路失败: Traceback (most recent call last):
   File "<string>", line 30, in <module>
     r0 = ai.answer("", cat)
-  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_4_0_wcvtg2fa\lib\ai.py", line 164, in answer
+  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_4_0_fzhcb0g1\lib\ai.py", line 164, in answer
     return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": 0}
                                                                                            
 
@@ -160,7 +161,7 @@
 - ❌ 核心链路失败: Traceback (most recent call last):
   File "<string>", line 30, in <module>
     r0 = ai.answer("", cat)
-  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_5_0_ikc0quyl\lib\ai.py", line 164, in answer
+  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_5_0_ua7b89ec\lib\ai.py", line 164, in answer
     return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": 0}
                                                                                            
 
@@ -180,7 +181,7 @@
 - ❌ 核心链路失败: Traceback (most recent call last):
   File "<string>", line 30, in <module>
     r0 = ai.answer("", cat)
-  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_6_0_lka_7se7\lib\ai.py", line 164, in answer
+  File "C:\Users\ERICZOU\AppData\Local\Temp\rm_audit_v1_6_0_pcohclpi\lib\ai.py", line 164, in answer
     return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": 0}
                                                                                            
 
@@ -301,6 +302,14 @@
 - 核心链路：`CORE_OK domain=考试与复习 subject=高等数学 kind=试卷与解析 hits=1 mode=none`
 - 功能探测：`FEATURES_OK wcf=ok named=6/6`
 - 导入模块：ai,catalog,classify,config,config_validate,download,extract,index,llm,napcat_launch,qq,qqlogin,vault,wechat,wechat_wcf
+- 自带自测末行：ALL PASS
+- 全部检测项通过，无异常。
+
+### `v3.0.0` — PASS
+
+- 核心链路：`CORE_OK domain=考试与复习 subject=高等数学 kind=试卷与解析 hits=1 mode=none`
+- 功能探测：`FEATURES_OK wcf=ok named=6/6`
+- 导入模块：ai,catalog,classify,config,config_validate,download,extract,index,llm,napcat_launch,napcat_setup,qq,qqlogin,vault,wechat,wechat_wcf
 - 自带自测末行：ALL PASS
 - 全部检测项通过，无异常。
 

@@ -3,6 +3,52 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v3.1.0] - 2026-11-07
+
+**内容驱动的泛化分类**：让工作群资料也能被精细化正确归类。用户明确指出「不能硬编码『学生用 A 目录 / 店主用 B 目录』」，并给出 `WeChatBridge → guiwei / FolderFox → RAG-In-A-Box Taxonomy → im-mcp` 的参考路径。本版逐一核查了 5 个 GitHub 仓库，落地其中 4 个的设计思想，明确排除第 5 个。
+
+### 外部方案核查结论
+| 项目 | 状态 | 本仓库的处理 |
+| --- | --- | --- |
+| [guiwei](https://github.com/xntj-ai/guiwei) | 存在，MIT | **借鉴**：不预设目录树、模态 + 文档体裁、vocab 别名归一防标签裂变、dry-run / 可撤销、敏感件闸门 |
+| [RAG-In-A-Box](https://github.com/DevNexsler/RAG-In-A-Box) | 存在 | **借鉴**：Taxonomy 受控词表 + 语义匹配 + CRUD，让检索与分类对齐同一套规范标签 |
+| [FolderFox](https://github.com/ChenAI-TGF/FolderFox) | 存在 | **借鉴**：先预览方案再执行、可撤销 |
+| [WeChatBridge](https://github.com/freestylefly/WeChatBridge) | 存在 | **借鉴**：不读数据库、不注入的本地归档通道（与已有「授权本地目录」适配器同构） |
+| [im-mcp](https://github.com/stkoecn/im-mcp) | 存在 | **不采用**：需从微信进程内存提取密钥并解密 SQLite 聊天库，与「绝不读取加密聊天数据库、不解密、不注入」的隐私边界冲突 |
+
+> 只取设计思想，**零运行时依赖**：全部规则用 Python 标准库；jieba / LLM 均为可选增强，缺失或失败静默回退到可解释的规则层。
+
+### 新增
+- **`lib/taxonomy.py`**：21 个中性规范体裁 / 267 个同义词的受控词表；`infer()` 按别名长度加权推断 `genre`；`extract_topics()` 从群内文件夹、文件名括号、已下载摘要**动态提取主题**（不预设主题表）；`modality()` 按扩展名识别 7 种模态；`is_sensitive()` 隐私闸门；`llm_enrich()` 可选 LLM 增强（默认关闭）；`match()` 语义匹配；`save_synonym()` 词表 CRUD（写 `state/taxonomy_overrides.json`，不进仓库、可撤销）；`preview()` dry-run；`snapshot()` / `detect_profile()`（后者**仅统计展示，不参与分类**）。
+- **`lib/classify.py::classify_extended()`**：融合 v3.0.0 三元组与泛化层，输出 `genre / topics / modality / confidence / reason / engine`；`expand_query()` 同时用 `classification.aliases` 与受控词表语义匹配扩展召回。
+- **`lib/catalog.py`**：新增 `genre`（体裁→模态）、`topic`（动态主题，多值）、`modality`（模态→体裁）三种下钻维度；`upsert_manifest()` / `reclassify()` 写入新字段；`public()` 下发新字段；`counts()` 增加体裁/主题/模态统计；`verify_integrity()` 门禁扩展到「每条都有 genre 与 modality」。目录 schema `version` 2 → 3。
+- **`server.py`**：`GET /taxonomy` 页面；`GET /api/taxonomy`（快照 + `?q=` 语义匹配）；`POST /api/taxonomy/preview`（纯 dry-run）；`POST /api/taxonomy/synonym`（CRUD，可选 `reclassify` 原地重算并校验完整性）；`/api/state` 与 `/api/diagnose` 增加 taxonomy 概要。
+- **`web/taxonomy.html`**：分类体系页 —— 词表/同义词状态、体裁与模态分布、**校园群 / 工作群双场景对照试跑**（只预览不写盘）、同义词新增/移除 + 重新归类、语义匹配自检、技术来源与「不采用 im-mcp」边界说明。
+- **`tools/test_taxonomy.py`**：70 项端到端自测（双场景对照、无场景分支断言、动态主题/模态/敏感件闸门、词表 CRUD 隔离、真实 1625 条目录四道门禁、真实 HTTP 端点）。
+- `lib/index.py::_meta_str()` 把体裁/主题/模态/标签并入全文索引；`lib/vault.py::write_note()` 在 Obsidian frontmatter 写入 `genre / topics / modality` 与泛化分类路径。
+
+### 修复
+- **工作群资料全落「综合 / 其他资料 / 其他」**：旧三级词库围绕校园课程归纳，实测 12 份工作资料（合同、报销单、进货单、会议纪要、NDA、员工手册、PRD、排期表、销售报表、通知、指标看板、接口文档）全部无法归类。现在 **12/12 落到 12 个不同规范体裁**，0 份进兜底；「参考资料」作为 guiwei 式中性长尾兜底，细粒度由动态主题 + 模态承担。
+- **旧词库把 `.pptx` 销售报表误判成「学习 / 课件资源」**：根因是 `kinds.课件资源` 含裸关键词 `ppt`，任意 `.pptx` 都命中。中性纠偏规则：**无科目证据（`subject=综合`）且泛化层给出明确体裁时，用该体裁作为 `kind`、领域归「综合」**；有科目证据的校园文件完全保持 v3.0.0 结果。
+- **主题词碎片**：`_clean_topic()` 重写，去编号/日期、剔噪音、剥离体裁词、清理悬空连接词（「与复习」→「复习」、「版与制度」→「制度」、「智慧门店表」→「智慧门店」），并预计算排序后的词表以避免 1625 条重算时的 O(n²) 开销。
+- `tools/reclassify.py` 改用 `classify_extended()`（否则原地重算后 `verify_integrity()` 会因缺 genre 失败），并把已经稳定的召回基线从「警告」改为如实打印。
+
+### 变更
+- `config.json` 新增 `classification.taxonomy`（`enabled` / `llm_assist=false` / `max_topics=4` / `sensitive_keywords`），受控词表本体留在 `lib/taxonomy.py`，用户同义词覆盖留在本机 `state/`。
+- `web/index.html` / `web/app.js`：默认下钻视图改为「按体裁（内容驱动 · 推荐）」，新增「按动态主题」「按文件模态」；顶部新增「分类体系」按钮；文件列表与预览优先展示体裁 / 动态主题 / 模态与命中依据，旧三级分类降为兼容信息；统计卡展示体裁覆盖数、动态主题数与场景倾向（仅统计）。
+- `tools/smoke_test.py` 增加 `[18]` 泛化分类回归；`tools/test_v3.py` 增加 `[F]` 泛化分类回归；`tools/verify_release.py` 的 `KEY_FILES / API_PATHS / STATIC_PATHS` 纳入新文件、新端点与新页面；`tools/build_release_assets.py` 的 `REQUIRED_IN_ZIP` 同步。
+- `README.md` / `docs/FEATURES.md` / `docs/DEVLOG.md` / `docs/INSTALL.md` / `docs/README.md` / `docs/RELEASE.md` / `docs/VERSION_AUDIT.md` 同步本轮设计与验证数据。
+
+### 自测（全部先本地跑通再同步 GitHub）
+- `tools/test_taxonomy.py`：**70/70 PASS**（真实 HTTP 服务 + 真实 1625 条目录零污染）。
+- `tools/smoke_test.py`：**ALL PASS**（新增 `[18]`）。
+- `tools/test_v3.py`：**PASS**（原 37 项 + `[F]` 泛化回归）。
+- `tools/reclassify.py`：1625 条不变、id 集合不变、下载状态不变、完整性 OK；体裁 12 个 / 动态主题 1441 个 / 多归属标签 794 个；「高等代数」召回保持 124 条。
+- `python -m py_compile` 全部改动文件 + `node --check web/app.js` 与 4 个内联页面 JS：OK。
+- `tools/verify_release.py`（本地 `dist/`）与 `--from-github`（Release 直链）端到端通过；`tools/version_audit.py` 全版本审计通过。
+
+---
+
 ## [v3.0.0] - 2026-11-07
 
 **登录、安装、分类、微信四条链路的实测修复版**。本轮全部来自用户截图反馈的复现与端到端验证，不是纸面改动。

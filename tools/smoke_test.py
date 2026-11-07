@@ -244,6 +244,31 @@ def main():
         fail("[17] 微信登录/群文件页面入口缺失")
     print(f"[17] NapCat 自检(installed={_s['installed']} host={_ins['webui_host']}) / 登录页 / 微信入口 均 OK")
 
+    # ---- v3.1.0 新增回归：内容驱动泛化分类（工作群资料不能全落「其他资料」） ----
+    from lib import taxonomy as _tax
+    _work = [
+        ({"folder": "财务/报销", "name": "11月差旅费报销单.xlsx", "ext": ".xlsx"}, "财务与票据"),
+        ({"folder": "采购", "name": "供应商进货单_11月.xlsx", "ext": ".xlsx"}, "采购与供应"),
+        ({"folder": "例会", "name": "2024-11-05 周会会议纪要.docx", "ext": ".docx"}, "会议与纪要"),
+        ({"folder": "法务", "name": "保密协议NDA_签署版.pdf", "ext": ".pdf"}, "法务与合规"),
+    ]
+    for _r, _want in _work:
+        _got = _tax.infer(_r, config.CFG)["genre"]
+        if _got != _want:
+            fail(f"[18] 工作群资料「{_r['name']}」被归为「{_got}」，期望「{_want}」")
+    if "采购与供应" not in _tax.match("进货单", config.CFG)["genres"]:
+        fail("[18] 受控词语义匹配失效")
+    if "进货单" not in _clf.expand_query("采购单", config.CFG):
+        fail("[18] 泛化召回扩展失效")
+    for _d in ("genre", "topic", "modality"):
+        if len(catalog.tree(cat, _d, [])) < 2:
+            fail(f"[18] 新下钻维度 {_d} 无节点")
+    if not catalog.verify_integrity(cat)["ok"]:
+        fail("[18] 泛化分类后完整性门禁失败")
+    if 'id="btn-taxonomy"' not in (config.WEB / "index.html").read_text(encoding="utf-8"):
+        fail("[18] 分类体系入口缺失")
+    print("[18] 泛化分类 OK：工作资料 4/4 归位、语义匹配 / 召回扩展 / 三个新维度 / 完整性均通过")
+
     # 下载重试：瞬时失败应重试后成功；永久失败(已失效)不重试
     import tempfile as _tf2
     _tmp2 = _P(_tf2.mkdtemp(prefix="rm_retry_test_"))

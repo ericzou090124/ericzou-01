@@ -19,6 +19,7 @@
   <button id="btn-settings" class="btn">设置</button>
   <button id="btn-login" class="btn">QQ 登录</button>
   <button id="btn-wechat" class="btn">微信</button>
+  <button id="btn-taxonomy" class="btn" title="内容驱动的受控词表：体裁 / 动态主题 / 模态">分类体系</button>
   <button id="btn-setup" class="btn">首次配置</button>
   <button id="btn-refresh" class="btn">刷新来源</button>
   <button id="btn-diagnose" class="btn">系统诊断</button>
@@ -37,8 +38,11 @@
       <div class="row between">
         <h3>分类大纲</h3>
         <select id="dim" class="mini">
-          <option value="classify">按分类</option>
+          <option value="genre" selected>按体裁（内容驱动 · 推荐）</option>
+          <option value="topic">按动态主题（多归属）</option>
+          <option value="modality">按文件模态</option>
           <option value="tag">按主题标签（多归属）</option>
+          <option value="classify">按旧三级分类</option>
           <option value="source">按来源</option>
         </select>
       </div>

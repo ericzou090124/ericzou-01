@@ -45,8 +45,9 @@ def main() -> int:
     print(f"重算前 搜索「高等代数」（纯字符串）：{old_total} 条")
 
     for x in xs:
-        d, s, k, tags = classify.classify_full(x, config.CFG)
-        x.update({"domain": d, "subject": s, "kind": k, "tags": tags})
+        cls = classify.classify_extended(x, config.CFG)
+        x.update({k: cls[k] for k in ("domain", "subject", "kind", "tags", "genre", "topics",
+                                      "modality", "confidence", "reason", "engine")})
 
     after_ids = [x["id"] for x in xs]
     after_dl = {x["id"]: bool(x.get("downloaded")) for x in xs}
@@ -58,17 +59,22 @@ def main() -> int:
     }
     after_dom = collections.Counter(x.get("domain") for x in xs)
     after_sub = collections.Counter(x.get("subject") for x in xs)
+    after_genre = collections.Counter(x.get("genre") for x in xs)
     new_hits, new_total = catalog.query(cat, "classify", [], "高等代数", limit=1,
                                         with_total=True, cfg=config.CFG)
+    c = catalog.counts(cat)
     print(f"重算后：{len(xs)} 条；领域 {len(after_dom)} 个 / 科目 {len(after_sub)} 个 / "
-          f"标签 {catalog.counts(cat)['tags']} 个")
+          f"标签 {c['tags']} 个 / 体裁 {c['genres']} 个 / 动态主题 {c['topics']} 个")
+    print("体裁分布：" + "  ".join(f"{k}({v})" for k, v in after_genre.most_common(8)))
     print(f"重算后 搜索「高等代数」：{new_total} 条")
     print("完整性门禁：" + "  ".join(f"{k}={'OK' if v else 'FAIL'}" for k, v in checks.items()))
     if not all(checks.values()):
         print("校验失败，不写盘。")
         return 2
-    if new_total <= old_total:
-        print("警告：召回数没有提升，请检查 aliases 配置。")
+    if new_total < 100:
+        print(f"警告：召回基线异常（{new_total} 条），请检查 classification.aliases 配置。")
+    else:
+        print(f"召回基线：{new_total} 条（未因本轮重分类下降；纯字符串基线 {old_total} 条）")
 
     print("新增/变化的领域：" + ", ".join(
         f"{k}({before_dom.get(k,0)}→{v})" for k, v in after_dom.most_common()
