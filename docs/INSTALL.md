@@ -156,6 +156,17 @@ flowchart LR
 ## ❓ 常见问题
 
 <details>
+<summary><b>双击一键安装器提示「'-ExecutionPolicy' is not recognized… / 解压失败」？</b></summary>
+
+这是 **v2.9.0 及更早的 `resource-manager-installer.bat` 的已知缺陷**，已在 **v2.9.1** 修复：旧安装器把带中文的长命令直接交给 cmd，中文在 `chcp 65001` 下会破坏命令行的引号配对，导致整条命令被拆断。
+
+处理只需一步：**重新下载**。请从 [最新版 Release](https://github.com/ericzou090124/ericzou-01/releases/latest) 重新下载 `resource-manager-installer.bat`（或直接用固定直链 [点这里下载](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat)），覆盖旧文件后双击即可。直链文件名固定，永远指向最新版。
+
+如果仍然失败：① 换用 `resource-manager-full.zip`，先「全部提取」到空文件夹再双击 `start.bat`；② 确认下载完整（可在 PowerShell 里用 `Get-FileHash` 对照 `SHA256SUMS.txt`）；③ 把黑窗口里的报错截图发出来。
+
+</details>
+
+<details>
 <summary><b>双击 bat 没反应 / 一闪而过？</b></summary>
 
 99% 是 Python 没装或没勾 `Add python.exe to PATH`。重装并勾选后重启电脑。也可在程序文件夹按住 `Shift` + 右键 →「在此处打开终端」→ 输入 `python server.py`，把报错截图留下来排查。

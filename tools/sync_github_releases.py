@@ -273,7 +273,10 @@ def main() -> int:
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--assets-dir", help="把该目录中的资产上传到最新版 Release（幂等）")
     ap.add_argument("--assets-only", action="store_true", help="只上传资产，不改动仓库元信息与 Release 正文")
+    ap.add_argument("--asset-tags", help="额外把资产覆盖上传到指定 tag（逗号分隔）。"
+                                        "用于修复历史 Release 里已发布的坏附件，例如 --asset-tags v2.9.0")
     a = ap.parse_args()
+    extra_tags = [t.strip() for t in (a.asset_tags or "").split(",") if t.strip()]
     if not a.apply and not a.dry_run and not a.assets_only:
         ap.print_help()
         return 0
@@ -301,8 +304,12 @@ def main() -> int:
         d = Path(a.assets_dir or "dist")
         if not d.is_absolute():
             d = ROOT / d
-        print(f"仅上传资产（不改动正文）→ {latest}，目录 {d}")
-        return 0 if upload_release_assets(tok, latest, d) == 0 else 1
+        print(f"仅上传资产（不改动正文）→ {[latest] + extra_tags}，目录 {d}")
+        failed = 0
+        for t in [latest] + extra_tags:
+            print(f"\n上传到 {t} …")
+            failed += upload_release_assets(tok, t, d)
+        return 0 if failed == 0 else 1
     if a.dry_run:
         for t in tags:
             print(("  UPDATE " if t in by_tag else "  CREATE ") + t)
@@ -311,8 +318,9 @@ def main() -> int:
             d = Path(a.assets_dir)
             if not d.is_absolute():
                 d = ROOT / d
-            for n in ASSET_NAMES:
-                print(f"  ASSET {n}: {'存在' if (d / n).is_file() else '缺失'} -> {latest}")
+            for t in [latest] + extra_tags:
+                for n in ASSET_NAMES:
+                    print(f"  ASSET {n}: {'存在' if (d / n).is_file() else '缺失'} -> {t}")
         return 0
 
     # 1) 仓库元信息
@@ -369,8 +377,10 @@ def main() -> int:
         d = Path(a.assets_dir)
         if not d.is_absolute():
             d = ROOT / d
-        print(f"\n上传发布资产到 {latest}（目录 {d}）…")
-        failed += upload_release_assets(tok, latest, d)
+        print(f"\n上传发布资产到 {[latest] + extra_tags}（目录 {d}）…")
+        for t in [latest] + extra_tags:
+            print(f"  → {t}")
+            failed += upload_release_assets(tok, t, d)
     print(f"Releases 页面： {WEB}/releases")
     print(f"一键安装器直链： {WEB}/releases/latest/download/resource-manager-installer.bat")
     return 0 if failed == 0 else 1

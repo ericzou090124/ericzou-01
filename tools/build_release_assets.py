@@ -36,7 +36,7 @@ SUMS_NAME = "SHA256SUMS.txt"
 REQUIRED_IN_ZIP = (
     "server.py", "config.json", "README.md", "LICENSE", "start.bat", "install.bat",
     "docs/INSTALL.md", "docs/FEATURES.md", "docs/CHANGELOG.md", "docs/DEVLOG.md",
-    "tools/smoke_test.py", "web/index.html", "web/app.js", "lib/index.py",
+    "tools/smoke_test.py", "tools/verify_release.py", "web/index.html", "web/app.js", "lib/index.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 

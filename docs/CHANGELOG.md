@@ -3,7 +3,29 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v2.9.1] - 2026-11-07
+
+紧急修复：**一键安装器双击报 `'-ExecutionPolicy' is not recognized ...`，解压失败**。v2.9.0 的 Release 资产有此缺陷，请用本版（或 `latest` 直链）重新下载。
+
+### 修复
+- **根因 1（cmd 解析）**：旧安装器把 809 字节的 PowerShell 源码内联在 `powershell -NoProfile -ExecutionPolicy Bypass -Command "..."` 里，且命令行内含中文。在 `chcp 65001` 的 cmd 下，多字节字符按 OEM/GBK 解析造成双引号配对错乱、整行被拆断，于是 `-ExecutionPolicy` 被当成独立命令执行。改为把 PS 脚本用 **UTF-16LE + Base64 经 `-EncodedCommand` 传入**：bat 中所有命令行都是纯 ASCII，彻底绕开 cmd 的引号 / 管道 / 多字节解析。
+- **根因 2（标记占位符未替换）**：旧 `BAT_HEADER` 里 `$m='__M_P__'+'__M_S__'` 是占位符，`main()` 从未注入真实标记，即使命令能跑通也必然 `marker-not-found`。现由 `main()` 注入并与标记行做一致性自检。
+- **附带修复**：`RM_NO_LAUNCH=1` 分支执行完 `:done` 后未终止批处理，会继续把 30 万字节的 base64 payload 当命令执行；所有分支改为 `exit /b` 显式终止。
+- **附带加固**：解压改用 .NET `System.IO.Compression`（中文文件名不乱码、可覆盖写入），PowerShell 信息输出改走 `[Console]::Out.WriteLine`（消除 CLIXML 刷屏），解压后校验 `server.py` 存在。
+
+### 新增
+- **`tools/verify_release.py`**：发行前端到端验证，7 步链条 —— 下载资产（本地 `dist/` 或 `--from-github` 真实直链）→ SHA256 校验 → **用 cmd 真实执行安装器** → 完整包解压 + `compileall` + `import server` → 在解压目录用隔离 state/端口起**真实 HTTP 服务**并访问 5 个 API + 3 个静态资源 → 校验真实 catalog 零污染。
+- `tools/build_installer.py` 新增 `verify_installer()` 构建期静态自检：命令行必须纯 ASCII、必须是 `-EncodedCommand`、载荷必须是纯 base64、PS 标记表达式与标记行一致、内嵌 zip 关键文件齐全且 CRC 正常。
+
+### 文档
+- `docs/INSTALL.md` FAQ 增补「旧版安装器解压失败」的处置；`docs/README.md` 工具表补 `verify_release.py`；`RELEASE.md` 同步版本范围。
+
+---
+
 ## [v2.9.0] - 2026-11-07
+
+> [!WARNING]
+> 本版的一键安装器 `resource-manager-installer.bat` 存在解压失败缺陷（报 `'-ExecutionPolicy' is not recognized...`），已在 **v2.9.1** 修复。请使用 [最新版直链](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat) 重新下载；本页附件后续已覆盖为修复版，但仍建议直接升级到 v2.9.1。
 
 发行治理：给 GitHub Releases 补齐**可下载资产**与**零基础安装闭环**（持续迭代第 16 轮）。
 

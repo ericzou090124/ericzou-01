@@ -45,4 +45,5 @@
 | `tools/bench.py` | 索引 rebuild / sync / optimize 微基准 |
 | `tools/sync_github_releases.py` | 同步仓库描述/topics 与全部 GitHub Releases（幂等，正文取自 CHANGELOG，`--assets-dir dist` 可幂等上传发布资产） |
 | `tools/build_release_assets.py` | **构建 Release 资产** → `dist/`：一键安装器 + 完整内容 zip + SHA256SUMS，并自校验 zip |
-| `tools/build_installer.py` | 重建自解压安装器（被上一项复用） |
+| `tools/build_installer.py` | 重建自解压安装器（被上一项复用；含命令行 ASCII / EncodedCommand / 标记一致性静态自检） |
+| `tools/verify_release.py` | **发行前端到端验证**：下载 → SHA256 → cmd 真实执行安装器 → 解压包编译 → 起真实 HTTP 服务打 5 个 API + 3 个静态资源 → 真实数据零污染。支持 `--from-github` |
