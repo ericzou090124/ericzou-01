@@ -160,9 +160,10 @@ def _local_answer(q: str, hits: list[tuple[float, dict, str]]) -> str:
 def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | None = None) -> dict:
     t0 = time.time()
     q = (q or "").strip()
-    if not q:
-        return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none", "scope": f, "took_ms": 0}
     cfg = config.CFG
+    if not q:
+        return {"answer": "请输入问题。", "found": False, "sources": [], "mode": "none",
+                "scope": _scope_from_path(scope), "took_ms": 0}
     cat = cat or catalog.load()
     f = _merge_filter(_scope_from_path(scope), _filters(q, cfg))
     where = _where(f)
