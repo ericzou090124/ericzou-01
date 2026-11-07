@@ -1,3 +1,4 @@
+// 资源管理 v3.2.0 前端：分类整理（单值 subject/kind/source）、下载到 Obsidian、AI 问答。
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // 命中高亮：先转义防 XSS，再按查询词（CJK 整串 / 拉丁按空白切词）不区分大小写包裹 <mark>
@@ -11,7 +12,7 @@ function hl(text) {
   try { return safe.replace(new RegExp('(' + pat + ')', 'gi'), '<mark>$1</mark>'); }
   catch (e) { return safe; }
 }
-const state = { dim: 'genre', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [] };
+const state = { dim: 'subject', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [], search: '' };
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -29,23 +30,24 @@ async function loadState() {
   const d = await api('/api/state');
   state.counts = d.counts; state.source = d.source;
   const on = d.source.mode === 'live';
-  const offlineNote = (!on && (d.source.errors || []).length)
-    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}<br>通常是本机 NapCat 没运行。点「启动 NapCat」可自动拉起，或右上角「QQ 登录」网页里扫码：<button class="btn small primary" id="sb-napcat">启动 NapCat</button></div>`
-    : '';
   const loginBtn = $('#btn-login');
   loginBtn.className = on ? 'btn' : 'btn warn';
   loginBtn.title = on ? 'QQ 已在线，可打开登录页查看状态' : 'QQ 登录态失效，打开网页扫码登录';
-  const w = d.wechat || {}, wst = d.wcf || {};
-  const wxLabel = wst.capturing ? '监听中' : (wst.login ? '已登录' : (wst.enabled ? '已启用' : '未接入'));
-  const wxCls = (wst.capturing || wst.login) ? '' : 'off';
-  $('#sources').innerHTML = `
-    <div class="src"><span>QQ 群文件</span><span class="badge ${on ? '' : 'warn'}">${on ? '在线' : (d.source.mode === 'snapshot' ? '离线快照' : '未连接')}</span></div>
-    <div class="src"><span>微信</span><span class="badge ${wxCls}">${wxLabel}</span></div>
-    <button class="btn small" id="sb-wechat" style="width:100%;margin-bottom:6px">微信登录 / 群文件采集</button>
+  const offlineNote = (!on && (d.source.errors || []).length)
+    ? `<div class="mini" style="margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--warn-bg);color:var(--warn)">${esc(d.source.errors[0])}<br>通常是本机 NapCat 没运行。点「启动 NapCat」可自动拉起，或右上角「QQ 登录」网页里扫码：<button class="btn small primary" id="sb-napcat">启动 NapCat</button></div>`
+    : '';
+  $('#stats').innerHTML = `
+    <div class="row between"><span>QQ 群文件</span><span class="badge ${on ? '' : 'warn'}">${on ? '在线' : (d.source.mode === 'snapshot' ? '离线快照' : '未连接')}</span></div>
     ${offlineNote}
-    <div class="muted" style="font-size:11px">${esc(Object.entries(d.source.groups || {}).map(([k,v]) => `${k} ${v.files}`).join(' · '))}</div>`;
-  const sw = $('#sb-wechat');
-  if (sw) sw.onclick = () => window.open('/wechat', '_blank');
+    <div class="muted" style="font-size:11px;margin:6px 0">${esc(Object.entries(d.source.groups || {}).map(([k,v]) => `${k} ${v.files}`).join(' · '))}</div>
+    <hr>
+    <div>授权可见 <b>${d.counts.total}</b> 份</div>
+    <div>已下载 <b>${d.counts.downloaded}</b> · 仅元数据 <b>${d.counts.metadata_only}</b></div>
+    <div>${d.counts.subjects} 个学科 · ${d.counts.kinds} 种类型 · ${d.counts.sources} 个来源</div>
+    <div>${d.counts.tags} 个主题标签 · 覆盖 ${d.counts.tagged} 份</div>
+    <div class="${d.integrity.ok === false ? 'bad' : 'muted'}">${d.integrity.ok === false ? '⚠ 分类完整性校验异常' : '分类完整 · 无缺项漏项 ✓'}</div>
+    <div class="muted">合计约 ${(d.counts.size_bytes/1024/1024/1024).toFixed(2)} GB</div>
+    <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>`;
   const bn = $('#sb-napcat');
   if (bn) bn.onclick = async () => {
     toast('正在拉起 NapCat…', 4000);
@@ -57,22 +59,6 @@ async function loadState() {
     toast(r.ok ? (r.msg || '已启动 NapCat，稍后点「刷新来源」') : ('启动失败：' + (r.error || '')), 7000);
     if (r.ok) setTimeout(() => $('#btn-refresh').click(), 9000);
   };
-  $('#wechat-limits').innerHTML = `<details><summary>微信接入能力说明（点击展开）</summary>
-    <div style="padding-top:6px">微信通道基于 WeChatFerry 监听你勾选群里的文件消息：
-    需微信 PC 3.9.x 登录 + 本地 RPC 10086；历史群文件与加密聊天库不可读、不读取。
-    ${esc(w.reason || '')}<br>${Object.values(w.limits || {}).map(x => '· ' + esc(x)).join('<br>')}</div></details>`;
-  const c = d.counts, ig = d.integrity || {}, tax = d.taxonomy || {};
-  $('#stats').innerHTML = `<div>授权可见 <b>${c.total}</b> 份</div>
-    <div>已下载 <b>${c.downloaded}</b> · 仅元数据 <b>${c.metadata_only}</b></div>
-    <div><b>${c.genres || 0}</b> 个规范体裁 · <b>${c.topics || 0}</b> 个动态主题 · ${c.modalities || 0} 种模态</div>
-    <div>覆盖体裁 <b>${c.genre_covered || 0}</b> 份 · 长尾兜底 ${c.genre_other || 0} 份 · ${c.tags || 0} 个多归属标签</div>
-    <div class="muted mini">词表 ${tax.genre_count || 0} 个体裁 / ${tax.alias_count || 0} 个同义词 · 场景倾向 ${esc((tax.profile || {}).profile || '-')}（仅统计，不参与分类）</div>
-    <div class="${ig.ok === false ? 'bad' : 'muted'}">${ig.ok === false ? '⚠ 分类完整性校验异常' : '分类完整 · 无缺项漏项 ✓'}</div>
-    <div class="muted">合计约 ${(c.size_bytes/1024/1024/1024).toFixed(2)} GB</div>
-    <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>
-    <button class="btn small" id="sb-taxonomy" style="width:100%;margin-top:6px">打开分类体系 / 对照试跑</button>`;
-  const stx = $('#sb-taxonomy');
-  if (stx) stx.onclick = () => window.open('/taxonomy', '_blank');
 }
 
 function renderCrumb() {
@@ -95,10 +81,11 @@ async function reload() {
     api(`/api/tree?dim=${state.dim}&node=${node}`),
     api(`/api/files?dim=${state.dim}&node=${node}&q=${encodeURIComponent(state.search || '')}&limit=500&kind=${encodeURIComponent(state.kind || '')}`)
   ]);
-  // 左栏：当前节点的同级（点选可切换分支）
+  // 左栏：当前节点的同级（点选可切换分支），顶层则展示当前层级
   const parent = nodeParam(state.path.slice(0, -1));
   const sib = state.path.length ? await api(`/api/tree?dim=${state.dim}&node=${parent}`) : { children: [] };
-  $('#tree').innerHTML = (sib.children.length ? sib.children : t.children).map(c =>
+  const treeKids = (sib.children && sib.children.length ? sib.children : t.children);
+  $('#tree').innerHTML = treeKids.map(c =>
     `<div class="${c.name === state.path[state.path.length-1] ? 'active' : ''}" data-name="${esc(c.name)}"><span>${esc(c.name)}</span><span class="n">${c.count}</span></div>`
   ).join('') || '<div class="muted">暂无分类</div>';
   $('#tree').querySelectorAll('[data-name]').forEach(el => el.onclick = () => {
@@ -118,7 +105,7 @@ async function reload() {
   $('#node-sub').textContent = `${f.total} 份文件${cap}${t.children.length ? ' · 可继续下钻到下一级' : ' · 当前层级为末级'}`;
   renderKindBar();
   renderFiles();
-  $('#ai-scope').textContent = '当前范围：' + (state.path.length ? state.path.join(' › ') : '全部') + (state.kind ? ' › ' + state.kind : '');
+  $('#ai-scope').textContent = '范围：' + (state.path.length ? state.path.join(' › ') : '全部') + (state.kind ? ' › ' + state.kind : '');
 }
 
 function renderKindBar() {
@@ -143,8 +130,8 @@ function renderFiles() {
     <div class="file">
       <input type="checkbox" data-id="${esc(x.id)}" ${state.selected.has(x.id) ? 'checked' : ''} ${x.downloaded ? 'disabled' : ''}>
       <div class="name">${hl(x.name)}
-        <div class="meta">体裁 ${hl(x.genre || '参考资料')} · 主题 ${hl((x.topics || []).slice(0, 3).join(' / ') || '—')} · ${esc(x.modality || '')} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}</div>
-        <div class="meta">旧三级 ${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)}${(x.tags || []).length ? ' · 标签：' + hl((x.tags || []).slice(0, 4).join(' / ')) : ''}</div>
+        <div class="meta">学科 ${hl(x.subject || '综合')} · 类型 ${hl(x.kind || '其他资料')} · ${esc(x.size)}${x.downloaded ? ' · <span style="color:var(--ok)">已下载</span>' : ' · <span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}</div>
+        <div class="meta">来源 ${esc(x.source)} / ${esc(x.group)}${(x.tags || []).length ? ' · 标签：' + hl((x.tags || []).slice(0, 4).join(' / ')) : ''}</div>
       </div>
       <span class="link" data-id="${esc(x.id)}">预览</span>
     </div>`).join('');
@@ -159,25 +146,26 @@ function renderFiles() {
 async function showPreview(id) {
   const d = await api('/api/file?id=' + encodeURIComponent(id));
   const x = d.item; state.preview = x;
-  $('#preview').innerHTML = `
-    <div style="font-weight:600;margin-bottom:6px">${esc(x.name)}</div>
-    <div class="muted" style="line-height:1.8">
+  $('#dialog').innerHTML = `
+    <div class="dialog-head"><h3>${esc(x.name)}</h3><span class="link dialog-close" id="pv-close">关闭 ✕</span></div>
+    <div class="muted" style="line-height:1.9">
       来源：${esc(x.source)} / ${esc(x.group)}<br>
-      <b>泛化分类</b>：${esc(x.genre || '参考资料')} › ${(x.topics || []).slice(0, 4).map(esc).join(' / ') || '—'} › ${esc(x.modality || '其他')}<br>
-      <span class="mini">依据：${esc((x.reason && x.reason.matched || []).slice(0, 5).join('、') || '无体裁词命中，长尾兜底')} · 引擎 ${esc(x.engine || 'rules')} · 置信度 ${esc(x.confidence ?? '—')}</span><br>
-      旧三级分类：${esc(x.domain)} › ${esc(x.subject)} › ${esc(x.kind)}<br>
+      学科 / 类型：${esc(x.subject || '综合')} · ${esc(x.kind || '其他资料')}<br>
+      <span class="mini">置信度 ${esc(x.confidence ?? '—')} · 引擎 ${esc(x.engine || 'rules')}</span><br>
       主题标签：${(x.tags || []).map(esc).join(' / ') || '（无）'}<br>
       群内路径：${esc(x.path)}<br>
       体积：${esc(x.size)} · 上传：${esc(x.uploaded_at || '未知')}<br>
       状态：${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据，未下载，无正文摘要</span>'}
     </div>
     <div style="margin-top:10px"><b>内容摘要</b><div class="muted" style="margin-top:4px">${esc(x.summary || '尚未下载，无正文摘要；只有文件名、路径与分类等元数据')}</div></div>
-    ${x.body_excerpt ? `<div style="margin-top:10px"><b>正文片段</b><div class="muted" style="max-height:150px;overflow:auto;white-space:pre-wrap;margin-top:4px">${esc(x.body_excerpt.slice(0, 900))}</div></div>` : ''}
+    ${x.body_excerpt ? `<div style="margin-top:10px"><b>正文片段</b><div class="muted" style="max-height:160px;overflow:auto;white-space:pre-wrap;margin-top:4px">${esc(x.body_excerpt.slice(0, 1000))}</div></div>` : ''}
     ${x.note_abs ? `<div class="muted" style="margin-top:8px;word-break:break-all">笔记：${esc(x.note_abs)}</div>` : ''}
-    <div class="row gap" style="margin-top:12px">
+    <div class="row gap" style="margin-top:14px">
       <button class="btn small primary" id="pv-download" ${x.downloaded ? 'disabled' : ''}>${x.downloaded ? '已下载' : '下载此文件'}</button>
       <button class="btn small" id="pv-copy">复制路径</button>
     </div>`;
+  $('#modal').classList.remove('hidden');
+  $('#pv-close').onclick = closeModal;
   const b = $('#pv-download');
   if (b) b.onclick = () => confirmDownload([x.id], 'selection', '', x.name);
   $('#pv-copy').onclick = () => { navigator.clipboard.writeText(x.asset_abs || x.path); toast('已复制路径'); };
@@ -189,12 +177,16 @@ $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
 
 async function confirmDownload(ids, scope, nodeName, singleName) {
   if (!ids.length) return toast('请先勾选文件');
+  if (state.source.mode === 'snapshot') {
+    return toast('当前为离线快照，只能预览元数据，不能下载。请先「刷新来源」切回在线状态。', 7000);
+  }
   const chosen = ids.map(id => state.files.find(f => f.id === id)).filter(Boolean);
   const bytes = chosen.reduce((a, b) => a + (b.size_bytes || 0), 0);
   const second = scope === 'category';
   modal(`<h3>${second ? '整类下载 · 二次确认' : '确认下载'}</h3>
     <div class="muted">即将下载 <b>${ids.length}</b> 个文件，合计约 <b>${(bytes/1024/1024).toFixed(2)} MB</b>。
-    下载后会自动分类入库、生成摘要与多级大纲。${second ? '<br><span style="color:var(--warn)">整类下载影响范围较大，请原样输入节点名称确认。</span>' : ''}</div>
+    下载后会自动分类入库、生成摘要与多级大纲，并写入 Obsidian 知识库。
+    ${second ? '<br><span style="color:var(--warn)">整类下载影响范围较大，请原样输入节点名称确认。</span>' : ''}</div>
     <div class="list" style="margin-top:10px">${chosen.slice(0, 12).map(x => `<div>· ${esc(x.name)}</div>`).join('')}${chosen.length > 12 ? `<div>… 其余 ${chosen.length-12} 个</div>` : ''}</div>
     ${second ? `<label>请输入节点名称「${esc(nodeName)}」</label><input id="cf" placeholder="${esc(nodeName)}">` : ''}
     <div class="actions"><button class="btn" id="mc">取消</button><button class="btn primary" id="mok">确认下载</button></div>`);
@@ -273,9 +265,6 @@ function settingsModal() {
 }
 
 $('#btn-login').onclick = () => window.open('/login', '_blank');
-$('#btn-wechat').onclick = () => window.open('/wechat', '_blank');
-$('#btn-taxonomy').onclick = () => window.open('/taxonomy', '_blank');
-$('#btn-setup').onclick = () => { window.location.href = '/setup'; };
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';
   try { const r = await api('/api/refresh', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
@@ -299,26 +288,10 @@ $('#btn-download-category').onclick = () => {
 $('#btn-ask').onclick = () => ask($('#ask').value);
 $('#ask').onkeydown = (e) => { if (e.key === 'Enter') ask($('#ask').value); };
 $('#btn-settings').onclick = settingsModal;
-$('#btn-diagnose').onclick = async () => {
-  try {
-    const d = await api('/api/diagnose');
-    const errs = (d.errors || []).map(e => `<li class="bad">✗ ${esc(e)}</li>`).join('');
-    const warns = (d.warnings || []).map(w => `<li class="warn">! ${esc(w)}</li>`).join('');
-    const status = d.ok ? `<b class="ok">配置正常</b>` : `<b class="bad">存在 ${d.errors.length} 项配置错误</b>`;
-    modal(`<h3>系统诊断</h3>
-      <p>${status} ｜ 来源模式：<b>${esc(d.mode || '-')}</b> ｜ QQ 在线：<b>${d.qq_online ? '是' : '否'}</b> ｜ 索引：<b>${d.index_docs}</b> 篇 ｜ 库：<code>${esc(d.vault || '-')}</code></p>
-      <h4>错误（${d.errors.length}）</h4><ul class="diag">${errs || '<li class="ok">无</li>'}</ul>
-      <h4>提醒（${d.warnings.length}）</h4><ul class="diag">${warns || '<li class="ok">无</li>'}</ul>
-      <div class="row between" style="margin-top:10px"><button id="mc" class="btn small">关闭</button></div>`);
-    $('#mc').onclick = closeModal;
-  } catch (e) { toast('诊断失败：' + e.message); }
-};
-$('#btn-ai').onclick = () => { $('#ai-card').scrollIntoView({behavior:'smooth'}); $('#ask').focus(); };
 $('#btn-ask-search').onclick = () => {
   const q = ($('#search').value || '').trim();
   if (!q) return toast('先在搜索框输入查询，再点「问 AI」');
   $('#ask').value = q; ask(q);
-  $('#ai-card').scrollIntoView({behavior:'smooth'});
 };
 $('#chips').innerHTML = ['高等数学有哪些期末真题？', '复变函数积分变换怎么复习？', '线性代数课件资源在哪？', '宿舍水电费在哪交？']
   .map(q => `<span class="chip">${esc(q)}</span>`).join('');
@@ -327,7 +300,6 @@ $('#chips').querySelectorAll('.chip').forEach(el => el.onclick = () => ask(el.te
 async function checkSetup() {
   try {
     const d = await api('/api/setup');
-    $('#btn-setup').onclick = () => { window.location.href = '/setup'; };
     if (!d.done) {
       const b = $('#setup-banner');
       b.classList.remove('hidden');

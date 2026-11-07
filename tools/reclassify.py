@@ -59,13 +59,13 @@ def main() -> int:
     }
     after_dom = collections.Counter(x.get("domain") for x in xs)
     after_sub = collections.Counter(x.get("subject") for x in xs)
-    after_genre = collections.Counter(x.get("genre") for x in xs)
-    new_hits, new_total = catalog.query(cat, "classify", [], "高等代数", limit=1,
-                                        with_total=True, cfg=config.CFG)
+    after_kind = collections.Counter(x.get("kind") for x in xs)
+    _, new_total = catalog.query(cat, "subject", [], "高等代数", limit=1,
+                                 with_total=True, cfg=config.CFG)
     c = catalog.counts(cat)
-    print(f"重算后：{len(xs)} 条；领域 {len(after_dom)} 个 / 科目 {len(after_sub)} 个 / "
-          f"标签 {c['tags']} 个 / 体裁 {c['genres']} 个 / 动态主题 {c['topics']} 个")
-    print("体裁分布：" + "  ".join(f"{k}({v})" for k, v in after_genre.most_common(8)))
+    print(f"重算后：{len(xs)} 条；领域 {len(after_dom)} 个 / 学科 {len(after_sub)} 个 / "
+          f"类型 {len(after_kind)} 个 / 标签 {c.get('tags', 0)} 个")
+    print("类型分布：" + "  ".join(f"{k}({v})" for k, v in after_kind.most_common(8)))
     print(f"重算后 搜索「高等代数」：{new_total} 条")
     print("完整性门禁：" + "  ".join(f"{k}={'OK' if v else 'FAIL'}" for k, v in checks.items()))
     if not all(checks.values()):

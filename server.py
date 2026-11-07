@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (ai, catalog, config, config_validate, download, index, llm, napcat_launch,  # noqa: E402
-                 napcat_setup, qq, qqlogin, taxonomy, vault, wechat, wechat_wcf)
+                 napcat_setup, qq, qqlogin, vault)
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -51,7 +51,8 @@ def refresh(force_snapshot: bool = False) -> dict:
     if live:
         for key, g in groups.items():
             try:
-                r, nfold = qq.walk(int(g["qq_group"]))
+                # 单次遍历上限 10s：在线但未登录等异常态下不会长时间阻塞刷新
+                r, nfold = qq.walk(int(g["qq_group"]), timeout=10)
                 rows += [dict(source="QQ群", group=g["display"], group_id=int(g["qq_group"]), **z) for z in r]
                 gs[g["display"]] = {"files": len(r), "folders": nfold, "live": True}
             except Exception as e:
@@ -90,40 +91,6 @@ def ensure() -> dict:
         if not CAT.get("items"):
             refresh()
     return CAT
-
-
-# ---- 微信(WeChatFerry)监听采集：缓冲 + 防抖 upsert 进 catalog ----
-_WECHAT_BUF: list[dict] = []
-_WECHAT_TIMER = None
-_WECHAT_LOCK = threading.Lock()
-
-
-def wechat_on_row(row: dict) -> None:
-    global _WECHAT_TIMER
-    with _WECHAT_LOCK:
-        _WECHAT_BUF.append(row)
-        if _WECHAT_TIMER is None:
-            _WECHAT_TIMER = threading.Timer(5.0, wechat_flush)
-            _WECHAT_TIMER.daemon = True
-            _WECHAT_TIMER.start()
-
-
-def wechat_flush() -> None:
-    global _WECHAT_BUF, _WECHAT_TIMER
-    with _WECHAT_LOCK:
-        if not _WECHAT_BUF:
-            _WECHAT_TIMER = None
-            return
-        rows, _WECHAT_BUF, _WECHAT_TIMER = _WECHAT_BUF, [], None
-    cat = ensure()
-    # 微信采集只是「部分来源」的几条消息：绝不裁剪目录，否则会删光 QQ 群文件
-    n = catalog.upsert_manifest(cat, rows, config.CFG)
-    catalog.save(cat)
-    # 增量同步：仅重算变化的条目，避免每次捕获落库都全量重建索引（REVIEW 瓶颈#4）
-    index.sync(cat)
-    vault.build_outlines(cat)
-    wechat_wcf._note_captured()
-    print(f"[微信采集] 已并入 {n} 条文件元数据（索引增量同步完成）")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -181,18 +148,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file("login.html")
             if p == "/setup":
                 return self._file("setup.html")
-            if p == "/wechat":
-                return self._file("wechat.html")
-            if p == "/taxonomy":
-                return self._file("taxonomy.html")
-            if p == "/api/taxonomy":
-                # 受控词表快照（只读）。?q= 时附带语义匹配结果，不写任何数据。
-                cat = ensure()
-                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
-                q = (q.get("q", [""])[0] or "").strip()
-                if q:
-                    snap["match"] = taxonomy.match(q, config.CFG)
-                return self._send(snap)
             if p == "/api/setup":
                 return self._send(setup_status())
             if p == "/api/qq/groups":
@@ -207,10 +162,6 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/napcat/setup":
                 # ok 表示请求成功；自检结论放在 status 里，避免两个 ok 语义混淆
                 return self._send({"ok": True, "status": napcat_setup.status()})
-            if p == "/api/wechat/wcf/status":
-                return self._send({"ok": True, **wechat_wcf.status(config.CFG)})
-            if p == "/api/wechat/wcf/rooms":
-                return self._send(wechat_wcf.get_rooms(config.CFG))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
             if p == "/api/diagnose":
@@ -220,11 +171,6 @@ class Handler(BaseHTTPRequestHandler):
                 d["index_docs"] = index.count()
                 d["vault"] = str(config.vault())
                 d["napcat"] = napcat_setup.status()
-                d["wechat"] = wechat_wcf.status(config.CFG)
-                d["taxonomy"] = {"enabled": bool(((config.CFG.get("classification") or {})
-                                                   .get("taxonomy") or {}).get("enabled", True)),
-                                 "genres": len(taxonomy.genres(config.CFG)),
-                                 "llm_assist": bool(taxonomy.snapshot([], config.CFG)["llm_assist"])}
                 return self._send({"ok": True, **d})
             if p == "/api/health":
                 # _sync_source() 已在请求开头实时探活；这里用状态缓存，
@@ -234,18 +180,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "vault": str(config.vault())})
             if p == "/api/state":
                 cat = ensure()
-                wstatus = wechat.status(config.CFG)
-                wstatus["wcf"] = wechat_wcf.status(config.CFG)
-                wstatus["capturing"] = wechat_wcf.is_capturing()
-                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
                 return self._send({"ok": True, "source": SOURCE_STATUS, "counts": catalog.counts(cat),
                                    "integrity": catalog.verify_integrity(cat),
-                                   "taxonomy": {"genre_count": snap["genre_count"],
-                                                "alias_count": snap["alias_count"],
-                                                "top_genres": dict(list(snap["genre_distribution"].items())[:8]),
-                                                "profile": snap["profile"],
-                                                "llm_assist": snap["llm_assist"]},
-                                   "wechat": wstatus, "wcf": wstatus["wcf"],
                                    "settings": config.public_settings(),
                                    "download_cap": config.CFG.get("max_download_per_batch", 30)})
             if p == "/api/tree":
@@ -311,24 +247,6 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/napcat/setup":
                 # 安装自检 + 自动修复本机 NapCat 配置（只改配置，不改 QQ 账号数据）
                 return self._send(napcat_setup.ensure(fix=True, start=False))
-            if p == "/api/wechat/wcf/enable":
-                return self._send(wechat_wcf.enable(bool(body.get("enabled", True))))
-            if p == "/api/wechat/wcf/install":
-                return self._send(wechat_wcf.install_wcferry())
-            if p == "/api/wechat/wcf/login":
-                return self._send(wechat_wcf.login_check(config.CFG))
-            if p == "/api/wechat/wcf/rooms/save":
-                wechat_wcf.save_rooms(body.get("rooms") or [])
-                return self._send({"ok": True, "rooms": wechat_wcf.load_rooms()})
-            if p == "/api/wechat/wcf/capture/start":
-                rooms = body.get("rooms") or []
-                r = wechat_wcf.start_capture(config.CFG, rooms, wechat_on_row)
-                r["capturing"] = wechat_wcf.is_capturing()
-                return self._send(r)
-            if p == "/api/wechat/wcf/capture/stop":
-                r = wechat_wcf.stop_capture()
-                r["capturing"] = wechat_wcf.is_capturing()
-                return self._send(r)
             if p == "/api/qqlogin/restore":
                 # 先快速判断 NapCat/OneBot 是否可达：完全没运行时立即给出可操作提示，
                 # 避免轮询 20+ 秒让页面像卡死（这是 v1.2.3 自测发现的真实卡顿）。
@@ -401,31 +319,8 @@ class Handler(BaseHTTPRequestHandler):
                 if len(catalog.items(cat)) != before or not v["ok"]:
                     return self._send({"ok": False, "error": "重算后完整性校验失败，请检查目录",
                                        "integrity": v}, 500)
-                snap = taxonomy.snapshot(catalog.items(cat), config.CFG)
                 return self._send({"ok": True, "items": n, "counts": catalog.counts(cat),
-                                   "integrity": v, "outlines": vault.build_outlines(cat),
-                                   "taxonomy": {"genre_count": snap["genre_count"],
-                                                "profile": snap["profile"],
-                                                "top_genres": dict(list(snap["genre_distribution"].items())[:8])}})
-            if p == "/api/taxonomy/preview":
-                # FolderFox / guiwei 式 dry-run：只推断，不写目录、不移动/改名任何文件
-                return self._send(taxonomy.preview(body.get("rows") or [], config.CFG))
-            if p == "/api/taxonomy/synonym":
-                # 受控词表 CRUD，写 state/taxonomy_overrides.json（不进仓库，可撤销）
-                r = taxonomy.save_synonym(str(body.get("genre") or ""),
-                                          str(body.get("word") or ""),
-                                          str(body.get("action") or "add"), config.CFG)
-                if r.get("ok") and body.get("reclassify"):
-                    cat = ensure()
-                    before = len(catalog.items(cat))
-                    n = catalog.reclassify(cat, config.CFG)
-                    catalog.save(cat)
-                    index.sync(cat)
-                    iv = catalog.verify_integrity(cat)
-                    r["reclassified"] = n
-                    r["integrity"] = iv
-                    r["items_unchanged"] = len(catalog.items(cat)) == before
-                return self._send(r)
+                                   "integrity": v, "outlines": vault.build_outlines(cat)})
             if p == "/api/maintain":
                 return self._send(index.optimize())
             if p == "/api/init":
@@ -457,16 +352,17 @@ def main():
         print("配置自检通过。")
 
     vault.init()
-    print("初始化资源库…")
-    r = refresh()
-    print("来源刷新：", r.get("mode"), r.get("items"), "条；索引", r.get("indexed"), "篇")
-    if r.get("errors"):
-        print("警告：", "; ".join(r["errors"][:3]))
     host = config.CFG.get("host", "127.0.0.1")
     port = int(config.CFG.get("port", 8787))
     srv = ThreadingHTTPServer((host, port), Handler)
+    # 关键健壮性修复：先起 HTTP 服务，再在后台刷新来源。
+    # 否则当 NapCat/OneBot 在线但登录态异常时，refresh() 的群文件遍历会长时间阻塞，
+    # 导致进程迟迟不接受连接、浏览器「进不去」。后台刷新不影响界面立即可用，
+    # 且 ensure() 会优先复用已落盘的 catalog.json，首屏即有数据。
+    threading.Thread(target=refresh, daemon=True).start()
     print(f"资源管理界面： http://{host}:{port}")
     print(f"Obsidian 库： {config.vault()}")
+    print("正在后台刷新来源（首次可能需联网；离线时自动使用本地快照）…")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

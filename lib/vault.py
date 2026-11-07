@@ -115,7 +115,8 @@ def build_outlines(cat: dict) -> dict:
     """生成总览 + 全量多级大纲 + 每个层级一页 MOC。"""
     xs = catalog.items(cat)
     c = catalog.counts(cat)
-    dims = catalog.DIMS["classify"]
+    # v3.2.0：大纲按「领域 → 学科 → 类型」三级单值维度组织（不再使用已移除的 classify 多值维度）
+    dims = ["domain", "subject", "kind"]
     groups: dict[tuple, list[dict]] = {}
     for x in xs:
         for depth in (1, 2, 3):
@@ -125,7 +126,7 @@ def build_outlines(cat: dict) -> dict:
     # 总览
     lines = ["# 资源管理 · 总览", "",
              f"授权可见条目 **{c['total']}** 份 ｜ 已下载 **{c['downloaded']}** 份 ｜ 仅元数据 **{c['metadata_only']}** 份",
-             f"覆盖 **{c['domains']}** 个领域、**{c['subjects']}** 个科目/主题 ｜ 合计约 **{c['size_bytes']/1024/1024/1024:.2f} GB**", "",
+             f"覆盖 **{c['subjects']}** 个学科、**{c['kinds']}** 种类型 ｜ 合计约 **{c['size_bytes']/1024/1024/1024:.2f} GB**", "",
              "## 按领域下钻", ""]
     for (dom,), items_ in sorted(((k, vv) for k, vv in groups.items() if len(k) == 1), key=lambda t: -len(t[1])):
         lines.append(f"- {_wikilink('大纲/' + safe(dom) + '.md', dom)} — {len(items_)} 份"

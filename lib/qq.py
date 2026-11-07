@@ -119,10 +119,14 @@ def _row(f: dict, folder: str) -> dict:
     }
 
 
-def walk(group_id: int) -> tuple[list[dict], int]:
-    """递归只读遍历群文件全部目录，返回 (清单, 文件夹数)。不下载任何文件内容。"""
+def walk(group_id: int, timeout: int = 30) -> tuple[list[dict], int]:
+    """递归只读遍历群文件全部目录，返回 (清单, 文件夹数)。不下载任何文件内容。
+
+    timeout 控制单次接口调用上限：刷新来源时传入较短值，避免 OneBot 在线但未登录等
+    异常态下长时间阻塞（否则每次调用最长 30s × 多个群，会让刷新卡死）。
+    """
     rows: list[dict] = []
-    root = call("/get_group_root_files", {"group_id": group_id}, timeout=30)
+    root = call("/get_group_root_files", {"group_id": group_id}, timeout=timeout)
     for f in root.get("files", []):
         rows.append(_row(f, ""))
     queue = [(d["folder_id"], _safe(d.get("folder_name", ""))) for d in root.get("folders", [])]
@@ -134,7 +138,7 @@ def walk(group_id: int) -> tuple[list[dict], int]:
         visited.add(fid)
         n += 1
         try:
-            data = call("/get_group_files_by_folder", {"group_id": group_id, "folder_id": fid})
+            data = call("/get_group_files_by_folder", {"group_id": group_id, "folder_id": fid}, timeout=timeout)
         except Exception:
             continue
         for f in data.get("files", []):

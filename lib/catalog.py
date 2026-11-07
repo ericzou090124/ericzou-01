@@ -2,12 +2,15 @@
 
 条目无论是否下载都存在；downloaded 只表示「原文件已落地且正文已入库」。
 
-v3.0.0 两个关键修复：
-- 旧版 upsert_manifest 会用「本次 rows」反向裁剪整个目录，导致微信采集 / 本地目录
-  并入时把 1625 条 QQ 群文件删光（真正的漏项）。现在默认只并入不裁剪，
-  只有 refresh() 拿到 QQ 全量清单时才显式按同来源 prune。
-- 新增多归属 tags 与「按主题标签」维度，同一份文件可出现在多个节点下，
-  不再因为单选分类而被"藏"起来。
+v3.2.0 关键修复（用户反馈「分类计数对不上 / 出现空分类 / 严重错分」）：
+- 树维度改为**纯单值**：学科(subject) / 类型(kind) / 来源(source→group→folder)。
+  每个文件在任一维度上只有「一个值」，因此任意层级节点计数之和严格等于文件总数，
+  既不会出现「加起来对不上」，也不会出现「点了进去却是空」。
+- 彻底移除 v3.1.0 的 genre/topic/modality 多值树维度——那才是计数错乱与空分类的根因。
+- 多归属 `tags` 仅用于搜索召回扩展，不作为树维度。
+
+v3.0.0 仍保留的修复：
+- upsert_manifest 默认只并入不裁剪，绝不删既有条目（微信/本地来源并入不会删光 QQ 群文件）。
 """
 from __future__ import annotations
 
@@ -18,14 +21,12 @@ from pathlib import Path
 
 from . import classify, config, qq
 
+# 树维度全部为「单值」字段：每个文件在任一维度上只有唯一值，
+# 因此节点计数之和恒等于文件总数，绝不出现计数对不上或空分类。
 DIMS = {
-    "classify": ["domain", "subject", "kind"],
+    "subject": ["subject"],
+    "kind": ["kind"],
     "source": ["source", "group", "folder"],
-    "tag": ["tags"],  # 维度名叫 tag，实际字段是复数 tags（多值）
-    # v3.1.0 泛化维度：中性体裁 → 模态；动态主题（多值）；模态 → 体裁
-    "genre": ["genre", "modality"],
-    "topic": ["topics"],
-    "modality": ["modality", "genre"],
 }
 
 # 参与搜索的字段；tags/topics 为多值列表，_hay() 会自动展开
@@ -149,7 +150,7 @@ def _hay(x: dict) -> str:
 
 
 def _matches(x: dict, dim: str, node: list[str]) -> bool:
-    levels = DIMS.get(dim, DIMS["classify"])
+    levels = DIMS.get(dim, ["subject"])
     for i in range(min(len(node), len(levels))):
         v = x.get(levels[i], "")
         if isinstance(v, (list, tuple)):
@@ -168,7 +169,7 @@ def _labels(x: dict, key: str) -> list[str]:
 
 
 def tree(cat: dict, dim: str, node: list[str]) -> list[dict]:
-    levels = DIMS.get(dim, DIMS["classify"])
+    levels = DIMS.get(dim, ["subject"])
     if len(node) >= len(levels):
         return []
     key = levels[len(node)]
@@ -213,45 +214,57 @@ def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200,
 def counts(cat: dict) -> dict:
     xs = items(cat)
     tagset = {t for x in xs for t in (x.get("tags") or []) if t}
-    topicset = {t for x in xs for t in (x.get("topics") or []) if t}
-    genre_set = {str(x.get("genre") or "") for x in xs}
-    other_genres = sum(1 for x in xs if str(x.get("genre") or "") in
-                       ("", "其他资料", "参考资料"))
     return {
         "total": len(xs),
         "downloaded": sum(1 for x in xs if x.get("downloaded")),
         "metadata_only": sum(1 for x in xs if not x.get("downloaded")),
         "size_bytes": sum(int(x.get("size_bytes") or 0) for x in xs),
-        "domains": len({x.get("domain") for x in xs}),
         "subjects": len({x.get("subject") for x in xs}),
+        "kinds": len({x.get("kind") for x in xs}),
+        "sources": len({x.get("source") for x in xs}),
+        "groups": len({x.get("group") for x in xs}),
         "tags": len(tagset),
         "tagged": sum(1 for x in xs if x.get("tags")),
-        "genres": len(genre_set),
-        "topics": len(topicset),
-        "modalities": len({str(x.get("modality") or "") for x in xs}),
-        "genre_covered": len(xs) - other_genres,
-        "genre_other": other_genres,
     }
 
 
 def verify_integrity(cat: dict) -> dict:
-    """完整性门禁：条目数、id 唯一、每条都有主分类/标签/体裁/模态。
+    """完整性门禁：条目数、id 唯一、每条都有单值主分类（领域/学科/类型）与标签。
 
-    「分类后缺项漏项」是用户明确反馈过的问题，所以这里把 v3.1.0 新维度也纳入门禁：
-    每条记录都必须有可浏览的 genre 与 modality，否则视为分类不完整。
+    这是「分类后缺项漏项」的核心防线：任何一条记录缺主分类或标签都视为不完整。
     """
     xs = items(cat)
     ids = [x.get("id") for x in xs]
     missing_class = [x.get("id") for x in xs
                      if not all(str(x.get(k, "") or "") for k in ("domain", "subject", "kind"))]
     missing_tags = [x.get("id") for x in xs if not x.get("tags")]
-    missing_genre = [x.get("id") for x in xs if not str(x.get("genre") or "")]
-    missing_modality = [x.get("id") for x in xs if not str(x.get("modality") or "")]
+    missing_subject = [x.get("id") for x in xs if not str(x.get("subject") or "")]
+    missing_kind = [x.get("id") for x in xs if not str(x.get("kind") or "")]
     return {
         "ok": (len(ids) == len(set(ids)) and not missing_class and not missing_tags
-               and not missing_genre and not missing_modality),
+               and not missing_subject and not missing_kind),
         "total": len(xs), "unique_ids": len(ids) == len(set(ids)),
         "missing_class": len(missing_class), "missing_tags": len(missing_tags),
-        "missing_genre": len(missing_genre), "missing_modality": len(missing_modality),
+        "missing_subject": len(missing_subject), "missing_kind": len(missing_kind),
         "tagged": sum(1 for x in xs if x.get("tags")),
+    }
+
+
+def verify_tree_consistency(cat: dict, dim: str, node: list[str] | None = None) -> dict:
+    """一致性门禁（直接回应用户反馈）：在给定维度、给定层级下，所有子节点计数之和
+    必须严格等于「该节点实际匹配到的文件数」。
+
+    - 单值维度下，顶层子节点计数之和 == 文件总数（绝不出现对不上）；
+    - 任意节点点进去，文件列表的 total 必须与节点 count 完全一致（绝不出现空分类）。
+    返回 {ok, dim, node, sum, total, children}。
+    """
+    node = node or []
+    children = tree(cat, dim, node or [])
+    _, total = query(cat, dim, node or [], "", with_total=True)
+    s = sum(b.get("count", 0) for b in children)
+    return {
+        "ok": s == total,
+        "dim": dim, "node": node,
+        "children_sum": s, "node_total": total,
+        "children": len(children),
     }

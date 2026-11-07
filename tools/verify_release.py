@@ -50,18 +50,16 @@ ASSETS = (INSTALLER, ZIP, SUMS)
 KEY_FILES = (
     "server.py", "config.json", "README.md", "LICENSE", "start.bat", "install.bat",
     "docs/INSTALL.md", "docs/FEATURES.md", "web/index.html", "web/app.js",
-    "web/login.html", "web/wechat.html", "web/setup.html", "web/taxonomy.html",
+    "web/login.html", "web/setup.html",
     "lib/index.py", "lib/ai.py", "lib/napcat_setup.py", "lib/classify.py",
-    "lib/catalog.py", "lib/taxonomy.py",
-    "tools/smoke_test.py", "tools/test_v3.py", "tools/test_taxonomy.py", "tools/setup_napcat.bat",
+    "lib/catalog.py",
+    "tools/smoke_test.py", "tools/test_v3.py", "tools/setup_napcat.bat",
 )
-API_PATHS = ("/api/health", "/api/diagnose", "/api/tree?dim=classify&node=%5B%5D",
-             "/api/tree?dim=tag&node=%5B%5D", "/api/tree?dim=genre&node=%5B%5D",
-             "/api/tree?dim=topic&node=%5B%5D", "/api/tree?dim=modality&node=%5B%5D",
-             "/api/files?dim=classify&node=%5B%5D&limit=5",
-             "/api/state", "/api/qqlogin/status", "/api/napcat/setup",
-             "/api/wechat/wcf/status", "/api/taxonomy")
-STATIC_PATHS = ("/", "/app.js", "/style.css", "/login", "/wechat", "/setup", "/taxonomy")
+API_PATHS = ("/api/health", "/api/state", "/api/tree?dim=subject&node=%5B%5D",
+             "/api/tree?dim=kind&node=%5B%5D", "/api/tree?dim=source&node=%5B%5D",
+             "/api/files?dim=subject&node=%5B%5D&limit=5",
+             "/api/qqlogin/status", "/api/napcat/setup")
+STATIC_PATHS = ("/", "/app.js", "/style.css", "/login", "/setup")
 
 # 子进程引导脚本：在「解压出来的程序」里起服务，state/vault/端口全部隔离
 BOOTSTRAP = r'''

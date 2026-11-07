@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""v3.0.0 端到端自测：起真实 HTTP 服务，逐个打接口并做完整性断言。
+"""v3.2.0 端到端自测：起真实 HTTP 服务，逐个打接口并做完整性断言。
 
-覆盖用户反馈的四类问题：
-  A. QQ 登录链路（无控制台外链、二维码本页直出、刷新自动拉起）
-  B. install 的 NapCat 安装自检与配置修复
-  C. 分类不漏项（高等代数召回、多归属标签、微信来源并入不删条目）
-  D. 微信登录与群文件采集的可视化入口与端点
-  F. v3.1.0 泛化分类回归（体裁 / 动态主题 / 模态 / 词表 CRUD / 新页面）
+覆盖用户反馈的核心问题：
+  A. 静态页面 / QQ 登录页（无微信、无分类体系入口、无控制台外链）
+  B. NapCat 安装自检与配置修复
+  C. 单值分类一致性（subject/kind/source 三个维度：树节点和 == 文件总数，绝不空分类 / 计数对不上）
+  D. 分类完整性 + 搜索多归属召回（高等代数）+ 不错分回归
+  E. 老端点回归（health / tree / files / settings / outline）
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -27,6 +27,9 @@ sys.path.insert(0, str(ROOT))
 
 import server  # noqa: E402
 from lib import catalog, config, napcat_setup, qqlogin  # noqa: E402
+
+# 预载真实目录到 server，避免首请求触发阻塞式 refresh（确保集成测试首屏即稳定）
+server.CAT = catalog.load()
 
 PORT = int(os.environ.get("RM_TEST_PORT", "8799"))
 BASE = f"http://127.0.0.1:{PORT}"
@@ -57,7 +60,7 @@ def post(path: str, body: dict | None = None, timeout: float = 30):
 
 def main() -> int:
     print("=" * 60)
-    print("  v3.0.0 端到端自测（真实 HTTP 服务 @ %s）" % BASE)
+    print("  v3.2.0 端到端自测（真实 HTTP 服务 @ %s）" % BASE)
     print("=" * 60)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), server.Handler)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -65,7 +68,7 @@ def main() -> int:
     try:
         # ---------- A. 静态页面 / 登录 ----------
         print("\n[A] 页面与静态资源")
-        for p in ("/", "/login", "/setup", "/wechat", "/app.js", "/style.css"):
+        for p in ("/", "/login", "/setup", "/app.js", "/style.css"):
             try:
                 raw, ct, _ = get(p)
                 check("GET " + p, len(raw) > 100, f"{len(raw)} B / {ct.split(';')[0]}")
@@ -83,6 +86,9 @@ def main() -> int:
         check("登录页已删除 NapCat 控制台入口", no_console_entry(login_html))
         check("配置向导已删除 NapCat 控制台入口", no_console_entry(setup_html))
         check("登录页含「刷新二维码」与自动拉起", "btn-qr" in login_html and "autoStart" in login_html)
+        check("主页与登录页不再含微信入口（应已删除）",
+              "微信" not in (config.WEB / "index.html").read_text(encoding="utf-8")
+              and "wechat" not in login_html.lower())
 
         st = get("/api/qqlogin/status")[2]
         check("登录状态字段完整",
@@ -113,119 +119,71 @@ def main() -> int:
               f"{len(cfg_paths)} 个配置文件")
         print("  修复明细：" + ("；".join(s1["fixed"]) or "（配置本来就是正确的）"))
 
-        # ---------- C. 分类不漏项 ----------
-        print("\n[C] 分类完整性 / 召回 / 多归属")
+        # ---------- C. 单值分类一致性（直接守护用户反馈的计数 bug）----------
+        print("\n[C] 单值分类一致性（subject / kind / source）")
         state = get("/api/state")[2]
         c = state["counts"]
         check("目录条目总数仍是 1625（分类升级未丢文件）", c["total"] == 1625, f"total={c['total']}")
         check("完整性校验通过", state["integrity"]["ok"] is True,
               f"unique={state['integrity']['unique_ids']} tagged={state['integrity']['tagged']}")
-        check("主题标签已生成", c.get("tags", 0) >= 40 and c.get("tagged") == c["total"],
+        for dim in ("subject", "kind", "source"):
+            tree = get(f"/api/tree?dim={dim}&node=%5B%5D")[2]
+            files = get(f"/api/files?dim={dim}&node=%5B%5D&limit=5")[2]
+            sum_counts = sum(x["count"] for x in tree["children"])
+            check(f"维度 {dim}：树节点计数之和 == 文件总数（无空分类/计数对不上）",
+                  tree.get("ok") and files.get("ok") and sum_counts == files["total"] == 1625,
+                  f"树和={sum_counts} 文件数={files['total']} 节点数={len(tree['children'])}")
+            # 逐层下钻：每个非末级节点，其「文件列表 total」必须等于树里该节点的 count
+            # 抽查首个可下钻节点
+            if tree["children"]:
+                first = tree["children"][0]["name"]
+                node = urllib.parse.quote(json.dumps([first], ensure_ascii=False))
+                sub = get(f"/api/tree?dim={dim}&node={node}")[2]
+                subf = get(f"/api/files?dim={dim}&node={node}&limit=5")[2]
+                if sub.get("ok") and sub.get("children"):
+                    sub_sum = sum(x["count"] for x in sub["children"])
+                    check(f"维度 {dim} › {first}：下钻后仍一致",
+                          sub_sum == subf["total"],
+                          f"子树和={sub_sum} 文件数={subf['total']}")
+
+        # ---------- D. 分类完整性 + 搜索多归属召回 + 不错分 ----------
+        print("\n[D] 完整性 / 召回 / 不错分")
+        check("标签覆盖全部条目（单值分类下每条都带标签）",
+              c.get("tagged") == c["total"] and c.get("tags", 0) >= 40,
               f"tags={c.get('tags')} tagged={c.get('tagged')}")
 
         q = urllib.parse.quote("高等代数")
-        hits = get(f"/api/files?dim=classify&node=%5B%5D&q={q}&limit=500")[2]
-        check("搜索「高等代数」不再是 1 条", hits["total"] >= 100, f"total={hits['total']}（旧版为 1）")
+        hits = get(f"/api/files?dim=subject&node=%5B%5D&q={q}&limit=500")[2]
+        check("搜索「高等代数」不是 1 条（多归属别名召回）", hits["total"] >= 100, f"total={hits['total']}（旧版为 1）")
 
-        tagnode = urllib.parse.quote(json.dumps(["高等代数"], ensure_ascii=False))
-        taghits = get(f"/api/files?dim=tag&node={tagnode}&limit=500")[2]
-        check("「按主题标签 › 高等代数」可下钻且不留空", taghits["total"] >= 100,
-              f"total={taghits['total']}")
+        # 不错分：.pptx 销售报表不应归为课件资源；工作资料归位；流体力学→大学物理/试卷
+        from lib import classify as _clf
+        _, _, k_rpt = _clf.classify({"folder": "", "name": "2024年Q3销售业绩报表.pptx"}, config.CFG)
+        check("销售报表 .pptx 不再错判为课件资源", k_rpt != "课件资源", f"kind={k_rpt}")
+        _, _, k_mt = _clf.classify({"folder": "例会", "name": "周会会议纪要.docx", "ext": ".docx"}, config.CFG)
+        check("周会会议纪要归为会议纪要", k_mt == "会议纪要", f"kind={k_mt}")
+        d_f, s_f, k_f = _clf.classify({"folder": "", "name": "流体力学I期末试题.pdf"}, config.CFG)
+        check("流体力学I期末试题 → 大学物理/试卷与解析", s_f == "大学物理" and k_f == "试卷与解析", f"{s_f}/{k_f}")
 
-        tree = get("/api/tree?dim=tag&node=%5B%5D")[2]
-        names = {x["name"] for x in tree["children"]}
-        check("标签树含相关主题节点", "高等代数" in names and len(names) >= 40,
-              f"{len(names)} 个标签节点")
-        sum_counts = sum(x["count"] for x in tree["children"])
-        check("多归属生效：标签节点计数之和 > 文件总数",
-              sum_counts > c["total"], f"{sum_counts} > {c['total']}")
-
-        # 微信来源只并入、绝不删 QQ 条目（mock save，内存验证）
-        cat = server.CAT or catalog.load()
-        before = len(catalog.items(cat))
-        old_save = catalog.save
-        catalog.save = lambda _c: None
-        try:
-            n = catalog.upsert_manifest(cat, [{
-                "source": "微信(WeChatFerry)", "group": "自测群", "path": "t.pdf",
-                "name": "线性代数讲义.pdf", "folder": "(群文件消息)"}], config.CFG)
-        finally:
-            catalog.save = old_save
-        after = len(catalog.items(cat))
-        check("微信文件并入不删 QQ 群条目", n == 1 and after == before + 1,
-              f"{before} → {after}")
-        v = catalog.verify_integrity(cat)
-        check("并入后完整性仍通过", v["ok"] is True, f"total={v['total']}")
-
-        # ---------- D. 微信入口 ----------
-        print("\n[D] 微信登录与群文件采集")
-        ws = get("/api/wechat/wcf/status")[2]
-        check("微信状态字段完整",
-              all(k in ws for k in ("enabled", "available", "login", "capturing",
-                                    "captured", "saved_rooms", "login_hint")),
-              f"enabled={ws['enabled']} login={ws['login']} capturing={ws['capturing']}")
-        lg = post("/api/wechat/wcf/login")
-        check("微信登录检测端点可用且有可操作指引",
-              "ok" in lg and (lg.get("hint") or lg.get("msg") or lg.get("error")),
-              f"ok={lg.get('ok')} error={(lg.get('error') or '')[:60]}")
-        rs = get("/api/wechat/wcf/rooms")[2]
-        check("群清单端点可用（未登录时给出明确原因）", "ok" in rs and "reason" in rs,
-              f"ok={rs.get('ok')} reason={(rs.get('reason') or '')[:60]}")
-
-        # 一键启用 / 关闭：测完必须恢复原状
-        orig = bool(config.CFG["sources"]["wechat"]["wcf"].get("enabled"))
-        en = post("/api/wechat/wcf/enable", {"enabled": True})
-        en_state = get("/api/wechat/wcf/status")[2]
-        off = post("/api/wechat/wcf/enable", {"enabled": orig})
-        check("一键启用 / 关闭可用且状态可回退",
-              en.get("ok") is True and en_state.get("enabled") is True and off.get("ok") is True,
-              f"enabled→True→{orig}")
-        check("配置回退到原值",
-              bool(config.CFG["sources"]["wechat"]["wcf"].get("enabled")) == orig)
-
-        diag = get("/api/diagnose")[2]
-        check("系统诊断含 NapCat 与微信检查项", "napcat" in diag and "wechat" in diag)
-
-        # ---------- 回归：老端点 ----------
+        # ---------- E. 老端点回归 ----------
         print("\n[E] 老端点回归")
-        for p in ("/api/health", "/api/tree?dim=classify&node=%5B%5D",
-                  "/api/files?dim=classify&node=%5B%5D&limit=5", "/api/settings", "/api/outline"):
+        for p in ("/api/health", "/api/tree?dim=subject&node=%5B%5D",
+                  "/api/files?dim=subject&node=%5B%5D&limit=5", "/api/settings", "/api/outline"):
             try:
                 d = get(p)[2]
                 check("GET " + p.split("?")[0], d.get("ok") is not False, "")
             except Exception as e:
                 check("GET " + p.split("?")[0], False, str(e))
 
-        # ---------- F. v3.1.0 泛化分类 ----------
-        print("\n[F] v3.1.0 泛化分类回归")
-        raw, ct, _ = get("/taxonomy")
-        check("GET /taxonomy 分类体系页面可用", len(raw) > 3000 and "html" in ct, f"{len(raw)} B")
-        check("页面顶部有分类体系入口", 'id="btn-taxonomy"' in
-              (config.WEB / "index.html").read_text(encoding="utf-8"))
-        snap = get("/api/taxonomy")[2]
-        check("GET /api/taxonomy 快照字段完整",
-              all(k in snap for k in ("genre_count", "alias_count", "genres",
-                                      "genre_distribution", "modality_distribution", "profile")),
-              f"{snap.get('genre_count')} 体裁 / {snap.get('alias_count')} 同义词")
-        check("快照声明不采用 im-mcp（隐私边界）",
-              any("im-mcp" in s for s in snap.get("not_adopted", [])))
-        for dim in ("genre", "topic", "modality"):
-            d = get(f"/api/tree?dim={dim}&node=%5B%5D")[2]
-            check(f"/api/tree?dim={dim} 有节点", d.get("ok") is True and len(d["children"]) > 0,
-                  f"{len(d.get('children', []))} 个")
-        stt = get("/api/state")[2]
-        check("/api/state 含 taxonomy 与 genre/topics/modalities 计数",
-              "genre_count" in (stt.get("taxonomy") or {})
-              and all(k in stt["counts"] for k in ("genres", "topics", "modalities")))
-        pv = post("/api/taxonomy/preview", {"rows": [
-            {"folder": "财务/报销", "name": "11月差旅费报销单.xlsx", "ext": ".xlsx"},
-            {"folder": "例会", "name": "周会会议纪要.docx", "ext": ".docx"}]})
-        check("dry-run 预览不写盘且给出具体体裁",
-              pv.get("dry_run") is True and all(
-                  x["genre"] in ("财务与票据", "会议与纪要") for x in pv["items"]),
-              "、".join(x["genre"] for x in pv.get("items", [])))
-        check("目录完整性（含新维度）仍通过", stt["integrity"]["ok"] is True,
-              f"missing_genre={stt['integrity'].get('missing_genre')}")
+        # 旧多值维度必须已失效：dim=classify 回落到 subject，不得产生 genre 类节点
+        legacy = get("/api/tree?dim=classify&node=%5B%5D")[2]
+        if legacy.get("ok"):
+            check("dim=classify 未暴露旧体裁节点（已迁移到单值）",
+                  not any("体裁" in (x.get("name") or "") for x in legacy.get("children", [])),
+                  f"{len(legacy.get('children', []))} 个节点")
+
+        diag = get("/api/diagnose")[2]
+        check("系统诊断仍可用（含 NapCat 检查，但不再含微信）", "napcat" in diag)
 
     finally:
         srv.shutdown()

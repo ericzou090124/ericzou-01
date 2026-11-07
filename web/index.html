@@ -3,26 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>资源管理</title>
+<title>资源管理 · 本地知识库</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand">资源管理 <span class="sub">本地闭环</span></div>
+  <div class="brand">资源管理 <span class="sub">本地知识库</span></div>
   <nav class="crumb" id="crumb"></nav>
   <div class="spacer"></div>
   <div class="search-wrap">
-    <input id="search" class="search" placeholder="搜索文件名 / 路径 / 摘要…">
-    <button id="btn-ask-search" class="btn small" title="用 AI 基于当前范围回答这个查询">问 AI</button>
+    <input id="search" class="search" placeholder="搜索文件名 / 关键词…">
+    <button id="btn-ask-search" class="btn small" title="用 AI 基于当前范围回答">问 AI</button>
   </div>
-  <button id="btn-ai" class="btn primary">AI 助手</button>
-  <button id="btn-settings" class="btn">设置</button>
   <button id="btn-login" class="btn">QQ 登录</button>
-  <button id="btn-wechat" class="btn">微信</button>
-  <button id="btn-taxonomy" class="btn" title="内容驱动的受控词表：体裁 / 动态主题 / 模态">分类体系</button>
-  <button id="btn-setup" class="btn">首次配置</button>
   <button id="btn-refresh" class="btn">刷新来源</button>
-  <button id="btn-diagnose" class="btn">系统诊断</button>
+  <button id="btn-settings" class="btn">设置</button>
 </header>
 
 <div id="setup-banner" class="setup-banner hidden"></div>
@@ -30,22 +25,15 @@
 <div class="layout">
   <aside class="left">
     <section class="card">
-      <h3>授权来源</h3>
-      <div id="sources"></div>
-      <div id="wechat-limits" class="limits"></div>
+      <div class="row between"><h3>分类方式</h3></div>
+      <select id="dim" class="mini">
+        <option value="subject" selected>按学科</option>
+        <option value="kind">按类型</option>
+        <option value="source">按来源</option>
+      </select>
     </section>
     <section class="card grow">
-      <div class="row between">
-        <h3>分类大纲</h3>
-        <select id="dim" class="mini">
-          <option value="genre" selected>按体裁（内容驱动 · 推荐）</option>
-          <option value="topic">按动态主题（多归属）</option>
-          <option value="modality">按文件模态</option>
-          <option value="tag">按主题标签（多归属）</option>
-          <option value="classify">按旧三级分类</option>
-          <option value="source">按来源</option>
-        </select>
-      </div>
+      <div class="row between"><h3>分类大纲</h3><span class="muted mini" id="tree-hint">点击展开</span></div>
       <div id="tree" class="tree"></div>
     </section>
     <section class="card stats" id="stats"></section>
@@ -66,15 +54,11 @@
   </main>
 
   <aside class="right">
-    <section class="card" id="preview-card">
-      <h3>单文件预览</h3>
-      <div id="preview" class="muted">点击列表中的「预览」查看</div>
-    </section>
     <section class="card grow ai-card" id="ai-card">
-      <div class="row between"><h3>AI 助手</h3><label class="mini"><input type="checkbox" id="fast"> 快速模式</label></div>
-      <div class="muted" id="ai-scope" style="margin-bottom:6px">当前范围：全部</div>
+      <div class="row between"><h3>AI 问答</h3><label class="mini"><input type="checkbox" id="fast"> 快速</label></div>
+      <div class="muted" id="ai-scope" style="margin-bottom:6px">范围：全部</div>
       <div id="chat" class="chat"></div>
-      <div class="row gap"><input id="ask" class="ask" placeholder="口语化提问，如：有哪些高数真题还没下载？"><button id="btn-ask" class="btn primary small">提问</button></div>
+      <div class="row gap"><input id="ask" class="ask" placeholder="口语提问，如：高数期末真题有哪些？"><button id="btn-ask" class="btn primary small">提问</button></div>
       <div class="chips" id="chips"></div>
     </section>
   </aside>

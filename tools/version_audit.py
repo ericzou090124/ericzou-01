@@ -104,17 +104,7 @@ for folder, name in cases:
     if s != "综合":
         named += 1
 assert named >= 4, "科目词库疑似失效，命中具体科目仅 %d/%d" % (named, len(cases))
-wcf = "absent"
-try:
-    from lib import wechat_wcf
-    st = wechat_wcf.status(cfg)
-    assert st.get("mode") == "wechatferry", st
-    assert st.get("enabled") is False, "微信采集默认必须关闭"
-    assert isinstance(st.get("available"), bool)
-    wcf = "ok"
-except ImportError:
-    pass
-print("FEATURES_OK wcf=%s named=%d/%d" % (wcf, named, len(cases)))
+print("FEATURES_OK named=%d/%d" % (named, len(cases)))
 '''
 
 # 服务端核心路由完整性（避免某版本丢端点导致界面半瘫）

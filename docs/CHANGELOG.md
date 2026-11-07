@@ -3,6 +3,22 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v3.2.0] - 2026-11-07
+
+**修复用户反馈的三类分类 bug + 精简界面**。用户实测反馈：①分类下文件数目和实际数目完全不一致；②分类内出现没有文件的情况（空分类）；③出现严重分类不匹配。根因是 v3.1.0 的 `genre / topic / modality` **多值树维度**——同一文件会按多值字段重复计入多个树桶，导致节点计数之和 ≠ 文件总数、空桶、错分。本版彻底改为**纯单值分类维度**并重做界面。
+
+### 修复（直接回应用户反馈）
+- **分类计数严格一致**：树维度改为单值 `学科(subject)` / `类型(kind)` / `来源(source→群→文件夹)`。每个文件在任一维度上只有唯一值，因此任意层级节点计数之和 **严格等于文件总数**，既不会出现「加起来对不上」，也不会出现「点了进去却是空」。新增 `catalog.verify_tree_consistency()` 门禁，断言某维度某层级下所有子节点 `count` 之和 == 该节点实际匹配文件数；真实 1625 条目录上三个单值维度均验证 `ok=True`（subject 29 节点 / kind 13 节点 / source 1 节点，三者子节点和都 = 1625）。
+- **不错分**：裸扩展名 `.ppt` 已从词库剔除（这是「销售报表 .pptx 被错判成课件资源」的根因）；关键词按长度加权、科目全名命中额外 +12。实测 `流体力学I期末试题` 正确归「大学物理 / 试卷与解析」，销售报表 `.pptx` 不再判课件。
+- **启动不再「进不去」**：`server.main()` 改为**先起 HTTP 服务、再后台刷新来源**。原先 `refresh()` 在前台、且当 OneBot 在线但登录态异常时会长时间阻塞，导致进程迟迟不接受连接。同时给 `qq.walk()` 加 10s 超时，异常态下刷新不会卡死。
+- **`/api/outline` 500**：`lib/vault.py::build_outlines()` 误用已移除的 `catalog.DIMS["classify"]` 与不存在的 `counts()['domains']`，现改为固定 `领域→学科→类型` 三级并使用 `subjects/kinds`。
+
+### 变更
+- **彻底删除微信登录与分类体系**：移除 `lib/wechat.py` / `lib/wechat_wcf.py` / `lib/taxonomy.py`、`web/wechat.html` / `web/taxonomy.html`、`config.json` 的 `sources.wechat` 与 `classification.taxonomy`；删除 server 上所有 `/wechat*`、`/taxonomy` 端点。（微信适配器存在 `wcferry` 的 `Wcf()` 在 RPC 未启动时会直接 `os._exit` 退出进程、导致后台服务失败，且用户明确「微信的登陆可以不做了，直接删除吧」。）
+- **简洁优雅界面**：`web/index.html` / `web/app.js` / `web/style.css` 重写。只保留三大能力——**分类整理（单值 subject/kind/source 树）、下载到 Obsidian 分类知识库、AI 问答**——加必要的 QQ 登录 / 刷新来源 / 设置。删除顶部「微信 / 分类体系 / 首次配置 / 系统诊断」按钮；预览改为弹窗；统一浅色视觉。
+- **单值分类引擎**：`lib/classify.py` 只产出单值 `domain/subject/kind/tags`；`genre/topics/modality` 仅作兼容空字段，不再进入任何界面树。
+- **测试重写**：`tools/smoke_test.py` 与 `tools/test_v3.py` 移除全部微信 / 分类体系引用，改用 `dim=subject/kind/source`，并加入单值树一致性断言与不错分回归；`tools/reclassify.py` 改用新计数键。
+
 ## [v3.1.0] - 2026-11-07
 
 **内容驱动的泛化分类**：让工作群资料也能被精细化正确归类。用户明确指出「不能硬编码『学生用 A 目录 / 店主用 B 目录』」，并给出 `WeChatBridge → guiwei / FolderFox → RAG-In-A-Box Taxonomy → im-mcp` 的参考路径。本版逐一核查了 5 个 GitHub 仓库，落地其中 4 个的设计思想，明确排除第 5 个。

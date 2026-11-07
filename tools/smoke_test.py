@@ -4,11 +4,18 @@
     python tools/smoke_test.py
 退出码 0 = 通过；非 0 = 失败（打印首个失败项）。
 
-覆盖：
-- lib 各模块可导入（含 GitHub 微信适配器 wechat_wcf）
+覆盖（v3.2.0 单值分类模型）：
+- lib 各模块可导入
 - 索引 rebuild / sync 增量一致性（count 稳定、变更可被拾起）
-- wechat_wcf.status 在默认关闭下安全返回
-- 若 LLM 可用，跑一次最小 ask 不崩
+- 单值树一致性：subject / kind / source 三个维度下，子节点计数之和 == 该节点匹配文件数
+  （直接回应用户反馈「分类下文件数目和实际数目完全不一致 / 出现空分类」）
+- 分类完整性门禁（无缺项漏项 / 单值 domain/subject/kind 齐全 / 标签覆盖）
+- 搜索召回（高等代数多归属别名召回，不只有 1 条）
+- 不错分：.pptx 销售报表不判为课件资源；工作群资料归位到工作类类型
+- 下载流水线（sync 而非 rebuild、并行路径不丢数据、瞬时失败重试 / 永久失败不重试）
+- AI 问答（空问题优雅返回、退化路径命中、LLM 代理策略）
+- 配置自检（正常无 errors；坏配置报可读错误）
+- NapCat 自检 / QQ 登录页结构（无微信 / 无分类体系入口）
 """
 import os
 import sys
@@ -16,7 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from lib import catalog, config, index, ai, wechat_wcf  # noqa: E402
+from lib import catalog, config, index, ai, llm  # noqa: E402
 
 
 def fail(msg):
@@ -55,41 +62,68 @@ def main():
         fail(f"变更后 sync 总条数应不变，得到 {n_sync2} ≠ {total}")
     print(f"[5] sync(after 1 body change) -> {n_sync2} (总数不变，仅该条重算)")
 
-    s = wechat_wcf.status(config.CFG)
-    if s.get("enabled") is not False or s.get("mode") != "wechatferry":
-        fail(f"wechat_wcf.status 默认应 enabled=False 且 mode=wechatferry: {s}")
-    print(f"[6] wechat_wcf.status ok (enabled={s.get('enabled')}, available={s.get('available')}, mode={s.get('mode')})")
-
-    # 空问题不应抛 NameError（修复 scope 在定义前被引用）
+    # 空问题不应抛异常（修复 scope 在定义前被引用）
     try:
         r0 = ai.answer("", cat)
         if not isinstance(r0, dict) or "answer" not in r0:
             fail("ai.answer('') 返回结构异常")
     except Exception as e:
         fail(f"ai.answer('') 抛异常（应为优雅返回）：{type(e).__name__}: {e}")
-    print("[6b] ai.answer('') 不崩溃（空问题优雅返回）")
+    print("[6] ai.answer('') 不崩溃（空问题优雅返回）")
 
     # LLM opener：本地直连、外部走代理
-    from lib import llm as _llm
     import urllib.request as _ur
     def _has_proxy(op):
         return any(isinstance(h, _ur.ProxyHandler) for h in op.handlers)
-    local_op = _llm._opener_for("http://127.0.0.1:8080/v1/chat/completions")
-    ext_op = _llm._opener_for("https://api.openai.com/v1/chat/completions")
-    # 本地地址不应走代理（直连）；外部地址应带 ProxyHandler（沿用环境变量代理，沙箱出网必需）
+    local_op = llm._opener_for("http://127.0.0.1:8080/v1/chat/completions")
+    ext_op = llm._opener_for("https://api.openai.com/v1/chat/completions")
     if _has_proxy(local_op) or not _has_proxy(ext_op):
         fail(f"llm opener 代理策略异常：local_has_proxy={_has_proxy(local_op)} ext_has_proxy={_has_proxy(ext_op)}")
     print("[6c] llm opener: 本地直连 / 外部走代理 区分正确")
 
-    # 微信监听群清单持久化往返
-    wechat_wcf.save_rooms(["wxid_a", "wxid_b"])
-    if wechat_wcf.load_rooms() != ["wxid_a", "wxid_b"]:
-        fail("wechat_wcf save/load_rooms 往返失败")
-    wechat_wcf.save_rooms([])  # 还原，避免遗留测试数据
-    gr = wechat_wcf.get_rooms(config.CFG)
-    if "login" not in gr or "rooms" not in gr:
-        fail("wechat_wcf.get_rooms 结构异常")
-    print("[8] wechat_wcf 群清单持久化往返 + get_rooms 结构 OK")
+    # ---- v3.2.0 核心回归：单值树维度一致性（直接守护用户反馈的计数 bug）----
+    v = catalog.verify_integrity(cat)
+    if not v["ok"] or v["total"] != total:
+        fail(f"[7] 分类完整性校验失败：{v}")
+    if v["tagged"] != total:
+        fail(f"[7] 标签覆盖不足：{v['tagged']}/{total}（单值分类下每条都应带标签）")
+    print(f"[7] 完整性 OK（unique={v['unique_ids']} tagged={v['tagged']}/{total}）")
+
+    for dim in ("subject", "kind", "source"):
+        tc = catalog.verify_tree_consistency(cat, dim)
+        if not tc["ok"]:
+            fail(f"[8] 单值维度 {dim} 不一致：子节点和={tc['children_sum']} 实际={tc['node_total']}（用户反馈的计数 bug 复现）")
+        print(f"[8] 维度 {dim} 一致：子节点和={tc['children_sum']} == 实际={tc['node_total']}（{tc['children']} 个节点）")
+
+    # 搜索「高等代数」必须多归属召回，不会只有 1 条
+    import json as _json
+    _, n_ga = catalog.query(cat, "subject", [], "高等代数", 500, with_total=True, cfg=config.CFG)
+    if n_ga < 100:
+        fail(f"[9] 搜索「高等代数」召回仅 {n_ga} 条（单值别名召回退化）")
+    print(f"[9] 搜索「高等代数」召回 {n_ga} 条（多归属别名生效）")
+
+    # ---- 错分回归：裸扩展名 / 工作群资料 ----
+    from lib import classify as _clf
+    # 裸 pptx 销售报表不应判为「课件资源」
+    _, _, k_report = _clf.classify({"folder": "", "name": "2024年Q3销售业绩报表.pptx"}, config.CFG)
+    if k_report == "课件资源":
+        fail(f"[10] 销售报表 .pptx 被错判为「课件资源」：{k_report}")
+    # 工作群资料应落到工作类类型，而非长尾「其他资料」
+    work = [
+        ({"folder": "财务/报销", "name": "11月差旅费报销单.xlsx", "ext": ".xlsx"}, "财务与票据"),
+        ({"folder": "例会", "name": "2024-11-05 周会会议纪要.docx", "ext": ".docx"}, "会议纪要"),
+        ({"folder": "法务", "name": "保密协议NDA_签署版.pdf", "ext": ".pdf"}, "合同与协议"),
+        ({"folder": "采购", "name": "供应商进货单_11月.xlsx", "ext": ".xlsx"}, "采购与供应"),
+    ]
+    for row, want in work:
+        _, _, got = _clf.classify(row, config.CFG)
+        if got != want:
+            fail(f"[10] 工作资料「{row['name']}」归为「{got}」，期望「{want}」")
+    # 学科全名命中：流体力学I期末试题 → 大学物理 / 试卷与解析
+    d_f, s_f, k_f = _clf.classify({"folder": "", "name": "流体力学I期末试题.pdf"}, config.CFG)
+    if s_f != "大学物理" or k_f != "试卷与解析":
+        fail(f"[10] 「流体力学I期末试题」错分：{s_f}/{k_f}")
+    print(f"[10] 不错分 OK：销售报表→{k_report}；工作资料4/4 归位；流体力学→{s_f}/{k_f}")
 
     # 下载流水线重构回归：用 sync 而非 rebuild，且并行路径不丢数据
     import tempfile as _tf
@@ -151,23 +185,22 @@ def main():
         fail(f"download.run 必须只用 sync 不用 rebuild：{_calls}")
     if not (_dcat["items"][0]["downloaded"] and _dcat["items"][1]["downloaded"]):
         fail("download.run 未就地标记条目为已下载")
-    print(f"[9] download.run 用 sync(非rebuild) 且并行路径成功 2 条，索引调用 {_calls}")
+    print(f"[11] download.run 用 sync(非rebuild) 且并行路径成功 2 条，索引调用 {_calls}")
 
     # ai.answer 退化路径（FTS 未命中但词命中）必须正确命中，不能误报未找到
-    from lib import ai as _ai
-    _o_srch, _o_qt, _o_cnt = _ai.index.search, _ai.index.query_terms, _ai.index.count
-    _ai.index.search = lambda *a, **k: []          # 模拟 FTS 完全 miss
-    _ai.index.query_terms = lambda q, max_terms=24: ["复变"]  # 命中词在真实 catalog 中存在
-    _ai.index.count = lambda: total
+    _o_srch, _o_qt, _o_cnt = ai.index.search, ai.index.query_terms, ai.index.count
+    ai.index.search = lambda *a, **k: []          # 模拟 FTS 完全 miss
+    ai.index.query_terms = lambda q, max_terms=24: ["复变"]  # 命中词在真实 catalog 中存在
+    ai.index.count = lambda: total
     try:
-        _ra = _ai.answer("复变函数", cat, fast=True)
+        _ra = ai.answer("复变函数", cat, fast=True)
     finally:
-        _ai.index.search, _ai.index.query_terms, _ai.index.count = _o_srch, _o_qt, _o_cnt
+        ai.index.search, ai.index.query_terms, ai.index.count = _o_srch, _o_qt, _o_cnt
     if not _ra.get("found"):
         fail(f"ai.answer 退化路径误报未找到（修复前 corpus 为空 valid2 恒空）：{_ra}")
     if _ra.get("mode") not in ("fast", "llm", "local"):
         fail(f"ai.answer 退化路径 mode 异常：{_ra}")
-    print(f"[10] ai.answer 退化路径(FTS miss) 仍命中 found={_ra.get('found')} mode={_ra.get('mode')}")
+    print(f"[12] ai.answer 退化路径(FTS miss) 仍命中 found={_ra.get('found')} mode={_ra.get('mode')}")
 
     # 配置自检：正常配置无 errors；坏配置应报可读错误
     import copy as _copy
@@ -189,85 +222,25 @@ def main():
             fail(f"config_validate 漏报错误：{_r['errors']}")
     finally:
         config.CFG = _orig_cfg
-    print(f"[11] config_validate 正常配置 ok={_good['ok']}；坏配置正确报出 {len(_r['errors'])} 条错误")
+    print(f"[13] config_validate 正常配置 ok={_good['ok']}；坏配置正确报出 {len(_r['errors'])} 条错误")
 
-    # 群文件分类：锁住「泛化词导致领域误判」缺陷（生活与办事词库原含裸词『指南』）
-    from lib import classify as _clf
-    _cd1 = _clf.classify({"folder": "", "name": "C语言程序设计上机指南.txt"}, config.CFG)[0]
-    if _cd1 != "学习":
-        fail(f"学习类文档领域误判为「{_cd1}」（词库含泛化词）")
-    _cd2 = _clf.classify({"folder": "", "name": "宿舍水电缴费指南.pdf"}, config.CFG)[0]
-    if _cd2 != "生活与办事":
-        fail(f"生活类文档领域误判为「{_cd2}」")
-    _cd3 = _clf.classify({"folder": "", "name": "2024年校招简历模板.docx"}, config.CFG)[0]
-    if _cd3 != "实习与就业":
-        fail(f"就业类文档领域误判为「{_cd3}」")
-    print("[15] 群文件分类领域正确（学习 / 生活与办事 / 实习与就业 均归位）")
-
-    # ---- v3.0.0 新增回归：分类不漏项 / 多归属 / 别名召回 / 微信并入不删条目 ----
-    _v = catalog.verify_integrity(cat)
-    if not _v["ok"] or _v["total"] != total:
-        fail(f"[16] 分类完整性校验失败：{_v}")
-    _, _n_ga = catalog.query(cat, "classify", [], "高等代数", limit=1,
-                             with_total=True, cfg=config.CFG)
-    if _n_ga < 100:
-        fail(f"[16] 搜索「高等代数」召回仅 {_n_ga} 条（旧缺陷为 1 条）")
-    _tn = catalog.tree(cat, "tag", [])
-    if not any(x["name"] == "高等代数" for x in _tn):
-        fail("[16] 标签树缺少「高等代数」相关主题节点")
-    if sum(x["count"] for x in _tn) <= total:
-        fail("[16] 标签未实现多归属（计数之和应大于文件总数）")
-    _before_v3 = len(cat["items"])
-    catalog.upsert_manifest(cat, [{
-        "source": "微信(WeChatFerry)", "group": "自测群", "path": "s.pdf",
-        "name": "线性代数讲义.pdf", "folder": "(群文件消息)"}], config.CFG)
-    if len(cat["items"]) != _before_v3 + 1:
-        fail("[16] 微信来源并入把 QQ 群条目删掉了（漏项回归）")
-    cat["items"] = cat["items"][:_before_v3]  # 纯内存还原，不写盘
-    print(f"[16] 分类完整性 OK；「高等代数」召回 {_n_ga} 条；{len(_tn)} 个多归属标签；微信并入不删条目")
-
-    # ---- v3.0.0 新增回归：NapCat 自检 / QQ 登录页 / 微信入口 ----
+    # NapCat 自检 / QQ 登录页结构（v3.2.0：无微信 / 无分类体系入口）
     from lib import napcat_setup as _ns, qqlogin as _ql
     _s = _ns.status()
     if "installed" not in _s or "issues" not in _s or "running" not in _s:
-        fail(f"[17] NapCat 自检结构异常：{_s}")
+        fail(f"[14] NapCat 自检结构异常：{_s}")
     _ins = _ns.inspect()
     if _ins["installed"] and _ins["webui_host"] not in ("127.0.0.1", ""):
-        fail(f"[17] WebUI host 仍是 {_ins['webui_host']}，6099 会拒绝 127.0.0.1 连接")
+        fail(f"[14] WebUI host 仍是 {_ins['webui_host']}，6099 会拒绝 127.0.0.1 连接")
     _qs = _ql.status()
     if "webui_url" in _qs or not all(k in _qs for k in ("qr_image", "qr_key", "setup", "hint")):
-        fail("[17] qqlogin.status 结构异常或仍在对外暴露控制台地址")
+        fail("[14] qqlogin.status 结构异常或仍在对外暴露控制台地址")
     _lg = (config.WEB / "login.html").read_text(encoding="utf-8")
     if 'id="btn-webui"' in _lg or "6099/webui" in _lg:
-        fail("[17] 登录页仍保留跑不通的 NapCat 控制台入口")
-    if not (config.WEB / "wechat.html").is_file() or 'id="btn-wechat"' not in (config.WEB / "index.html").read_text(encoding="utf-8"):
-        fail("[17] 微信登录/群文件页面入口缺失")
-    print(f"[17] NapCat 自检(installed={_s['installed']} host={_ins['webui_host']}) / 登录页 / 微信入口 均 OK")
-
-    # ---- v3.1.0 新增回归：内容驱动泛化分类（工作群资料不能全落「其他资料」） ----
-    from lib import taxonomy as _tax
-    _work = [
-        ({"folder": "财务/报销", "name": "11月差旅费报销单.xlsx", "ext": ".xlsx"}, "财务与票据"),
-        ({"folder": "采购", "name": "供应商进货单_11月.xlsx", "ext": ".xlsx"}, "采购与供应"),
-        ({"folder": "例会", "name": "2024-11-05 周会会议纪要.docx", "ext": ".docx"}, "会议与纪要"),
-        ({"folder": "法务", "name": "保密协议NDA_签署版.pdf", "ext": ".pdf"}, "法务与合规"),
-    ]
-    for _r, _want in _work:
-        _got = _tax.infer(_r, config.CFG)["genre"]
-        if _got != _want:
-            fail(f"[18] 工作群资料「{_r['name']}」被归为「{_got}」，期望「{_want}」")
-    if "采购与供应" not in _tax.match("进货单", config.CFG)["genres"]:
-        fail("[18] 受控词语义匹配失效")
-    if "进货单" not in _clf.expand_query("采购单", config.CFG):
-        fail("[18] 泛化召回扩展失效")
-    for _d in ("genre", "topic", "modality"):
-        if len(catalog.tree(cat, _d, [])) < 2:
-            fail(f"[18] 新下钻维度 {_d} 无节点")
-    if not catalog.verify_integrity(cat)["ok"]:
-        fail("[18] 泛化分类后完整性门禁失败")
-    if 'id="btn-taxonomy"' not in (config.WEB / "index.html").read_text(encoding="utf-8"):
-        fail("[18] 分类体系入口缺失")
-    print("[18] 泛化分类 OK：工作资料 4/4 归位、语义匹配 / 召回扩展 / 三个新维度 / 完整性均通过")
+        fail("[14] 登录页仍保留跑不通的 NapCat 控制台入口")
+    if "微信" in _lg or "wechat" in (config.WEB / "index.html").read_text(encoding="utf-8").lower():
+        fail("[14] 主页/登录页仍残留微信入口（应已删除）")
+    print(f"[14] NapCat 自检(installed={_s['installed']} host={_ins['webui_host']}) / 登录页 / 无微信入口 均 OK")
 
     # 下载重试：瞬时失败应重试后成功；永久失败(已失效)不重试
     import tempfile as _tf2
@@ -303,7 +276,6 @@ def main():
     _cq, _pq = _CountQQ(), _PermQQ()
     try:
         _orig_r = (_dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save)
-        # 瞬时失败重试
         _dl.qq, _dl.vault, _dl.extract, _dl.index = _cq, _FakeVault(), _FakeExtract(), _FakeIndex()
         _dl.catalog.save = lambda c: None
         _rr = _dl.run(_dcat_r, ["r-r1"], confirm=True)
@@ -311,7 +283,6 @@ def main():
             fail(f"重试后仍未成功：{_rr}")
         if _cq.n < 3:
             fail(f"重试次数不足：fetch 被调用 {_cq.n} 次")
-        # 永久失败不重试
         _dl.qq = _pq
         _pr = _dl.run(_dcat_p, ["r-r2"], confirm=True)
         if _pr.get("succeeded") != 0:
@@ -322,12 +293,13 @@ def main():
         _dl.qq, _dl.vault, _dl.extract, _dl.index, _dl.catalog.save = _orig_r
         config.vault = _ovc
         os.environ.pop("RM_DOWNLOAD_WORKERS", None)
-    print(f"[12] 下载瞬时失败重试成功（fetch {_cq.n} 次后成功）；[13] 永久失败不重试（fetch {_pq.n} 次）")
+    print(f"[15] 下载瞬时失败重试成功（fetch {_cq.n} 次后成功）；[16] 永久失败不重试（fetch {_pq.n} 次）")
 
     # 集成自测：起一个本地 server 实例（隔离临时 STATE + vault），验证 HTTP 层与 JSON 形状不回归
     import time as _time, shutil as _sh, threading as _th, json as _json
     import urllib.request as _ur, urllib.parse as _up
     import server as _srvmod  # server.py 位于项目根目录（lib 之外），ROOT 已在 sys.path
+    _srvmod.CAT = cat  # 预载真实目录，避免首请求触发阻塞式 refresh（本测试会切换临时 STATE）
     _test_port = int(os.environ.get("RM_TEST_PORT", "8799"))
     _tmp_state = _P(_tf.mkdtemp(prefix="rm_srv_state_"))
     _tmp_vault = _P(_tf.mkdtemp(prefix="rm_srv_vault_"))
@@ -358,16 +330,28 @@ def main():
         _dp = _get("/api/diagnose")
         if not _dp.get("ok"):
             fail(f"集成 /api/diagnose 异常：{_dp}")
-        _tp = _get("/api/tree?dim=classify&node=" + _up.quote("[]"))
-        if not _tp.get("ok") or not isinstance(_tp.get("children"), list):
-            fail(f"集成 /api/tree 异常：{_tp}")
-        _fp = _get("/api/files?dim=classify&node=" + _up.quote("[]") + "&limit=5")
-        if not _fp.get("ok") or not isinstance(_fp.get("items"), list):
-            fail(f"集成 /api/files 异常：{_fp}")
+        # 单值维度 tree 一致性（HTTP 层）
+        for dim in ("subject", "kind", "source"):
+            _tp = _get(f"/api/tree?dim={dim}&node=" + _up.quote("[]"))
+            if not _tp.get("ok") or not isinstance(_tp.get("children"), list):
+                fail(f"集成 /api/tree?dim={dim} 异常：{_tp}")
+            _fp = _get(f"/api/files?dim={dim}&node=" + _up.quote("[]") + "&limit=5")
+            if not _fp.get("ok") or not isinstance(_fp.get("items"), list):
+                fail(f"集成 /api/files?dim={dim} 异常：{_fp}")
+            _sum = sum(c["count"] for c in _tp["children"])
+            if _sum != _fp["total"]:
+                fail(f"集成 维度 {dim} 树和={_sum} ≠ 文件总数={_fp['total']}（计数 bug 复现）")
         _sp = _get("/api/state")
-        if not _sp.get("ok") or "counts" not in _sp:
+        if not _sp.get("ok") or "counts" not in _sp or not _sp["integrity"].get("ok"):
             fail(f"集成 /api/state 异常：{_sp}")
-        print(f"[14] 集成自测通过：health/diagnose/tree/files/state 均 ok（docs={_hp.get('docs')}, files_items={len(_fp.get('items', []))}）")
+        # 旧多值维度必须已失效（回落单值，不产生 genre/topics/modalities 节点）
+        _legacy = _get("/api/tree?dim=classify&node=" + _up.quote("[]"))
+        if _legacy.get("ok") and len(_legacy.get("children", [])) > 0:
+            # 回落到 subject，应当等于 subject 顶层；只要不出现 genre 类节点即可
+            if any("体裁" in (c.get("name") or "") for c in _legacy["children"]):
+                fail("集成 dim=classify 仍暴露旧体裁节点（应已迁移）")
+        print(f"[17] 集成自测通过：health/diagnose/tree/files/state 均 ok；"
+              f"三维度树一致；docs={_hp.get('docs')}")
     finally:
         if _srv: _srv.shutdown(); _srv.server_close()
         config.CFG["port"] = _cfg_port
@@ -381,11 +365,11 @@ def main():
             r = ai.answer(cat, "请简要说明本库包含哪些科目？", scope=None)
             if not isinstance(r, dict) or "answer" not in r:
                 fail("ai.answer 返回结构异常")
-            print("[7] ai.answer OK")
+            print("[18] ai.answer OK")
         else:
-            print("[7] ai.answer skipped (no llm config)")
+            print("[18] ai.answer skipped (no llm config)")
     except Exception as e:
-        print(f"[7] ai.answer skipped (err: {e})")
+        print(f"[18] ai.answer skipped (err: {e})")
 
     print("\nALL PASS")
     sys.exit(0)
