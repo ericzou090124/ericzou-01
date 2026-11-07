@@ -191,6 +191,19 @@ def main():
         config.CFG = _orig_cfg
     print(f"[11] config_validate 正常配置 ok={_good['ok']}；坏配置正确报出 {len(_r['errors'])} 条错误")
 
+    # 群文件分类：锁住「泛化词导致领域误判」缺陷（生活与办事词库原含裸词『指南』）
+    from lib import classify as _clf
+    _cd1 = _clf.classify({"folder": "", "name": "C语言程序设计上机指南.txt"}, config.CFG)[0]
+    if _cd1 != "学习":
+        fail(f"学习类文档领域误判为「{_cd1}」（词库含泛化词）")
+    _cd2 = _clf.classify({"folder": "", "name": "宿舍水电缴费指南.pdf"}, config.CFG)[0]
+    if _cd2 != "生活与办事":
+        fail(f"生活类文档领域误判为「{_cd2}」")
+    _cd3 = _clf.classify({"folder": "", "name": "2024年校招简历模板.docx"}, config.CFG)[0]
+    if _cd3 != "实习与就业":
+        fail(f"就业类文档领域误判为「{_cd3}」")
+    print("[15] 群文件分类领域正确（学习 / 生活与办事 / 实习与就业 均归位）")
+
     # 下载重试：瞬时失败应重试后成功；永久失败(已失效)不重试
     import tempfile as _tf2
     _tmp2 = _P(_tf2.mkdtemp(prefix="rm_retry_test_"))
