@@ -41,13 +41,14 @@ API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 WEB = f"https://github.com/{OWNER}/{REPO}"
 
 DESCRIPTION = (
-    "QQ / 微信群文件 → 本地 Obsidian 知识库：三级自动分类、微信监听采集、"
-    "SQLite FTS5 全文检索、AI 防臆造问答。Python 标准库实现，零第三方硬依赖，数据全在本机。"
+    "QQ / 微信群文件 → 本地 Obsidian 知识库：内容驱动的泛化分类（学生课程群与工作资料群通用）、"
+    "微信监听采集、SQLite FTS5 全文检索、AI 防臆造问答。Python 标准库实现，零第三方硬依赖，数据全在本机。"
 )
 TOPICS = [
     "obsidian", "qq", "wechat", "knowledge-base", "group-files",
     "full-text-search", "sqlite-fts5", "python", "local-first",
     "ai-search", "wechatferry", "napcat", "note-taking",
+    "taxonomy", "document-classification",
 ]
 KNOWN_FIX = {f"v1.{n}.0": f"v1.{n}.0-p1" for n in (3, 4, 5, 6)}
 
