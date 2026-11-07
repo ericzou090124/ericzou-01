@@ -1,5 +1,3 @@
-<div align="center">
-
 # Resource Manager
 
 **把 QQ / 微信群里散落的课程资料，整理成一个可检索、可问答的本地 Obsidian 知识库**
@@ -12,8 +10,6 @@
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
 [![Version](https://img.shields.io/badge/Version-v2.8.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
-
-</div>
 
 ---
 

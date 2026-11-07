@@ -41,4 +41,5 @@
 | `tools/version_audit.py` | 全 tag 可用性审计 → `docs/VERSION_AUDIT.md` |
 | `tools/fix_legacy_tag.py` | 为历史缺陷版本生成 `-p1` 补丁标签（不改原 tag） |
 | `tools/bench.py` | 索引 rebuild / sync / optimize 微基准 |
+| `tools/sync_github_releases.py` | 同步仓库描述/topics 与全部 GitHub Releases（幂等，正文取自 CHANGELOG） |
 | `tools/build_installer.py` | 重建自解压安装器 |

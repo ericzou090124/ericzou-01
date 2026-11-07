@@ -361,7 +361,7 @@
 
 ### 文档产出
 
-- `README.md`（479 行 / 17KB）按参考仓库风格重写，含 7 个徽章、Mermaid 架构图、10 个折叠块、16 个二级章节；微信监听采集与群文件分类各有独立章节。
+- `README.md`（476 行 / 17KB）按参考仓库风格重写，含 6 个徽章、Mermaid 架构图、10 个折叠块、13 张表格、16 个二级章节；微信监听采集与群文件分类各有独立章节。已用 GitHub 官方 `POST /markdown` GFM 渲染 API 实测：H1/H2、徽章、表格、折叠块、警示块、Mermaid 均正确渲染，无 Markdown 字面量泄漏。
 - `docs/FEATURES.md`：两个功能的完整实现文档（选型与边界、消息四层过滤、群白名单状态机、端点/配置表、打分算法、实测样例、v2.8.0 词库修复 diff、代码索引）。
 - `docs/VERSION_AUDIT.md`（自动生成）、`docs/README.md`（索引重写）、`docs/RELEASE.md`（从 v1.2.3 更新到 v2.8.0，含完整版本表 + 新增功能验收项 + 已知限制）、`CHANGELOG.md` / 本文。
 
@@ -374,3 +374,10 @@
 ### 下一步
 
 仓库已进入「性能 / 正确性 / 健壮性 / 可观测性 + 文档治理」较完整状态。若继续：Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点，或补充 `LICENSE` 文件（当前 README 已如实说明未指定开源许可证）。
+
+### 同步与远端验证（v2.8.0 收尾）
+
+- 新增 `tools/sync_github_releases.py`（幂等）：从 `CHANGELOG.md` 解析各版本段落生成 Release 正文，追加安装方式、文档索引、审计结论；已有 Release 只更新正文**保留附件**；`-p1` 标签生成专门修复说明，KNOWN 版本正文顶部醒目提示可用补丁标签。Token 优先环境变量、否则 `git credential fill`，不落盘不回显。
+- 执行结果：远端原有 4 个 Releases（v1.2.0~v1.2.3）→ **新建 23 + 更新 4 = 27 个 Releases，覆盖全部 27 个 tag，0 失败**；`make_latest` 显式指定 v2.8.0。
+- 仓库元信息：description 由占位「写点东西」改为项目定位一句话；homepage 指向 README；补充 13 个 topics（`obsidian` / `qq` / `wechat` / `knowledge-base` / `sqlite-fts5` / `local-first` …）提升可发现性。
+- **渲染修正**：主页初版用 `<div align="center">` 包裹标题与徽章，在 CommonMark 的 HTML block 规则下存在渲染歧义（参考仓库本身也无居中语法）。改为纯 Markdown 后，用 GitHub 官方 `POST /markdown`（`mode=gfm`）实测：H1×1、H2×16、`<table>`×13、徽章图片 6、折叠块 10、警示块与 Mermaid 均在，Markdown 字面量泄漏 0。
