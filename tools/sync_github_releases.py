@@ -219,12 +219,16 @@ ASSET_NAMES = ("resource-manager-installer.bat", "resource-manager-full.zip", "S
 
 def upload_release_assets(tok: str, latest_tag: str, dist: Path) -> int:
     """把 dist/ 的资产幂等上传到最新版 Release（同名先删后传）。返回失败数。"""
-    st, rels = request("GET", API + "/releases?per_page=100", tok)
+    # 按 tag 精确查询（列表接口可能有缓存延迟，新建的 Release 会短暂查不到）
+    st, rel = request("GET", API + "/releases/tags/" + urllib.parse.quote(latest_tag), tok)
     if st != 200:
-        print("ERROR: 读取 Releases 失败:", rels)
-        return 1
-    rel = next((r for r in rels if r["tag_name"] == latest_tag), None)
-    if not rel:
+        print(f"NOTE: 按 tag 查询 {latest_tag} 返回 {st}，回退到列表查询")
+        st, rels = request("GET", API + "/releases?per_page=100", tok)
+        if st != 200:
+            print("ERROR: 读取 Releases 失败:", rels)
+            return 1
+        rel = next((r for r in rels if r["tag_name"] == latest_tag), None)
+    if not rel or not isinstance(rel, dict) or "upload_url" not in rel:
         print(f"ERROR: 找不到最新版 Release {latest_tag}")
         return 1
     upload_url = rel["upload_url"].split("{")[0]
@@ -268,8 +272,9 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--assets-dir", help="把该目录中的资产上传到最新版 Release（幂等）")
+    ap.add_argument("--assets-only", action="store_true", help="只上传资产，不改动仓库元信息与 Release 正文")
     a = ap.parse_args()
-    if not a.apply and not a.dry_run:
+    if not a.apply and not a.dry_run and not a.assets_only:
         ap.print_help()
         return 0
 
@@ -292,6 +297,12 @@ def main() -> int:
               if stable else tags[-1])
 
     print(f"本地 tags={len(tags)}  远端 releases={len(existing)}  latest={latest}")
+    if a.assets_only and not a.dry_run:
+        d = Path(a.assets_dir or "dist")
+        if not d.is_absolute():
+            d = ROOT / d
+        print(f"仅上传资产（不改动正文）→ {latest}，目录 {d}")
+        return 0 if upload_release_assets(tok, latest, d) == 0 else 1
     if a.dry_run:
         for t in tags:
             print(("  UPDATE " if t in by_tag else "  CREATE ") + t)

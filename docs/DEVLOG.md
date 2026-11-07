@@ -426,3 +426,10 @@
 ### 下一步（若继续）
 
 Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点；或给 README 补一张实际界面截图（目前全部为文字说明）。发行链路已闭环：`build_release_assets.py` → `sync_github_releases.py --apply --assets-dir dist` 两条命令即可复现全部资产与全部 Release 正文。
+
+### 发布后收尾（v2.9.0）
+
+- **git 传输故障**：推送时 `schannel: failed to receive handshake`。诊断发现 `api.github.com` 与 `github.com` 经代理均可达，问题在 Git 默认 `HTTP/2 + schannel` 组合；改 `git config --local http.version HTTP/1.1` + `http.sslBackend openssl` 后推送成功（main `4bf5f46` + tag `v2.9.0`）。
+- **资产上传修复**：`sync_github_releases.py` 初次按 `GET /releases?per_page=100` 列表查新建的 latest Release 未命中（列表缓存延迟）。改为 `GET /releases/tags/<tag>` 精确查询、失败再回退列表；并新增 `--assets-only` 只传资产模式。28 个 Release 正文（新建 1 / 更新 27 / 失败 0）与 3 个资产均已同步成功。
+- **发布后复跑审计**：28 标签 / 24 PASS / 4 KNOWN / 0 未修复失败，`v2.9.0` 全项 ✅ PASS（含自带 16 项自测）。
+- 根目录自解压安装器在全部文档定稿后重新生成，发布包 `dist/` 重新构建并幂等重传，保证 zip 内容与最终 main 一致。
