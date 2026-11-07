@@ -350,13 +350,76 @@ def main():
             # 回落到 subject，应当等于 subject 顶层；只要不出现 genre 类节点即可
             if any("体裁" in (c.get("name") or "") for c in _legacy["children"]):
                 fail("集成 dim=classify 仍暴露旧体裁节点（应已迁移）")
+        # 群筛选 HTTP 层：group 参数只返回该群；/api/groups 返回已配置+可添加
+        _g0 = sorted({x.get("group", "") for x in cat["items"]})[0]
+        _gt = _get(f"/api/tree?dim=subject&node=" + _up.quote("[]") + "&group=" + _up.quote(_g0))
+        if not _gt.get("ok") or not isinstance(_gt.get("children"), list):
+            fail(f"集成 /api/tree?group 异常：{_gt}")
+        _gf = _get(f"/api/files?dim=subject&node=" + _up.quote("[]") + "&group=" + _up.quote(_g0) + "&limit=5")
+        if not _gf.get("ok"):
+            fail(f"集成 /api/files?group 异常：{_gf}")
+        if _gf["total"] != sum(1 for x in cat["items"] if x.get("group") == _g0):
+            fail(f"集成 group 筛选总数不符：{_gf['total']}")
+        _grp = _get("/api/groups")
+        if not _grp.get("ok") or "configured" not in _grp or "available" not in _grp:
+            fail(f"集成 /api/groups 异常：{_grp}")
         print(f"[17] 集成自测通过：health/diagnose/tree/files/state 均 ok；"
-              f"三维度树一致；docs={_hp.get('docs')}")
+              f"三维度树一致；docs={_hp.get('docs')}；group 筛选与 /api/groups OK")
     finally:
         if _srv: _srv.shutdown(); _srv.server_close()
         config.CFG["port"] = _cfg_port
         config.STATE = _orig_state
         config.vault = _orig_vault
+
+    # ---- v3.3.0 群聊管理：增量增删 + 群筛选 ----
+    # [19] config.add_qq_group / remove_qq_group：增量增删、不重排既有代号、非法群号报错、还原真实配置
+    import json as _json
+    _cfg_path = config.CONFIG_PATH
+    _snap = _json.loads(_cfg_path.read_text(encoding="utf-8")) if _cfg_path.is_file() else _copy.deepcopy(config.CFG)
+    _orig_groups = dict((config.CFG.setdefault("sources", {}).setdefault("qq", {})).get("groups", {}))
+    try:
+        _g_add = config.add_qq_group("g_test_tmp", "测试群", "999999999")
+        if "g_test_tmp" not in _g_add or _g_add["g_test_tmp"]["qq_group"] != "999999999":
+            fail("[19] add_qq_group 未正确写入新群")
+        for _k in _orig_groups:
+            if _k not in _g_add:
+                fail(f"[19] add_qq_group 把既有代号 {_k} 弄丢了（重排问题）")
+        try:
+            config.add_qq_group("g_x", "坏群", "abc")
+            fail("[19] 非法群号未报错")
+        except ValueError:
+            pass
+        _g_rem = config.remove_qq_group("g_test_tmp")
+        if "g_test_tmp" in _g_rem:
+            fail("[19] remove_qq_group 未移除临时群")
+    finally:
+        config.CFG.clear(); config.CFG.update(_snap); config.write_json(_cfg_path, _snap)
+    print("[19] 群管理 add/remove OK（增量增删、不重排代号、非法群号报错、配置已还原）")
+
+    # [20] 群筛选：tree/query 的 group 参数只返回该群；各群条目和 == 总数
+    _groups_all = sorted({x.get("group", "") for x in cat["items"]})
+    _sum_pg = 0
+    for _g in _groups_all:
+        _cnt = sum(1 for x in cat["items"] if x.get("group") == _g)
+        _, _tot_g = catalog.query(cat, "subject", [], "", 100000, with_total=True, group=_g)
+        if _tot_g != _cnt:
+            fail(f"[20] query 群「{_g}」总数={_tot_g} ≠ 实际={_cnt}")
+        _tr = catalog.tree(cat, "subject", [], group=_g)
+        if sum(c["count"] for c in _tr) != _cnt:
+            fail(f"[20] tree 群「{_g}」桶和 != 该群条目数({_cnt})")
+        _sum_pg += _cnt
+    if _sum_pg != total:
+        fail(f"[20] 各群条目和={_sum_pg} ≠ 总数={total}")
+    print(f"[20] 群筛选 OK：{len(_groups_all)} 个群，tree/query 均只返回该群；各群和 == 总数({total})")
+
+    # [21] AI 检索范围支持按群限定（_pool 按 group 过滤，保证「只在该群内作答」）
+    for _g in _groups_all:
+        _pool = ai._pool(cat, {"group": _g})
+        if any(x.get("group") != _g for x in _pool):
+            fail(f"[21] ai._pool group={_g} 混入其它群")
+        if len(_pool) != sum(1 for x in cat["items"] if x.get("group") == _g):
+            fail(f"[21] ai._pool group={_g} 数量不符")
+    print(f"[21] AI 群范围 OK：_pool 按 group 严格过滤（{len(_groups_all)} 个群）")
 
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:

@@ -12,7 +12,7 @@ function hl(text) {
   try { return safe.replace(new RegExp('(' + pat + ')', 'gi'), '<mark>$1</mark>'); }
   catch (e) { return safe; }
 }
-const state = { dim: 'subject', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [], search: '' };
+const state = { dim: 'subject', path: [], files: [], selected: new Set(), counts: {}, source: {}, preview: null, kind: '', kindOptions: [], search: '', group: '' };
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -48,6 +48,13 @@ async function loadState() {
     <div class="${d.integrity.ok === false ? 'bad' : 'muted'}">${d.integrity.ok === false ? '⚠ 分类完整性校验异常' : '分类完整 · 无缺项漏项 ✓'}</div>
     <div class="muted">合计约 ${(d.counts.size_bytes/1024/1024/1024).toFixed(2)} GB</div>
     <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>`;
+  // 群聊范围下拉：用已纳入搜索池的群（SOURCE_STATUS.groups 的键即群显示名）
+  const gf = $('#group-focus');
+  const groups = Object.keys(d.source.groups || {});
+  const cur = state.group;
+  gf.innerHTML = '<option value="">全部群聊</option>' + groups.map(g =>
+    `<option value="${esc(g)}" ${g === cur ? 'selected' : ''}>${esc(g)}</option>`).join('');
+  if (cur && !groups.includes(cur)) { state.group = ''; }
   const bn = $('#sb-napcat');
   if (bn) bn.onclick = async () => {
     toast('正在拉起 NapCat…', 4000);
@@ -78,8 +85,8 @@ async function reload() {
   $('#search').value = state.search || '';
   const node = nodeParam(state.path);
   const [t, f] = await Promise.all([
-    api(`/api/tree?dim=${state.dim}&node=${node}`),
-    api(`/api/files?dim=${state.dim}&node=${node}&q=${encodeURIComponent(state.search || '')}&limit=500&kind=${encodeURIComponent(state.kind || '')}`)
+    api(`/api/tree?dim=${state.dim}&node=${node}&group=${encodeURIComponent(state.group || '')}`),
+    api(`/api/files?dim=${state.dim}&node=${node}&q=${encodeURIComponent(state.search || '')}&limit=500&kind=${encodeURIComponent(state.kind || '')}&group=${encodeURIComponent(state.group || '')}`)
   ]);
   // 左栏：当前节点的同级（点选可切换分支），顶层则展示当前层级
   const parent = nodeParam(state.path.slice(0, -1));
@@ -105,7 +112,7 @@ async function reload() {
   $('#node-sub').textContent = `${f.total} 份文件${cap}${t.children.length ? ' · 可继续下钻到下一级' : ' · 当前层级为末级'}`;
   renderKindBar();
   renderFiles();
-  $('#ai-scope').textContent = '范围：' + (state.path.length ? state.path.join(' › ') : '全部') + (state.kind ? ' › ' + state.kind : '');
+  $('#ai-scope').textContent = '范围：' + (state.path.length ? state.path.join(' › ') : '全部') + (state.kind ? ' › ' + state.kind : '') + (state.group ? ' › ' + state.group : '');
 }
 
 function renderKindBar() {
@@ -224,7 +231,7 @@ async function ask(q) {
   $('#chat').appendChild(el);
   try {
     const scope = JSON.stringify(state.path);
-    const d = await api(`/api/ask?q=${encodeURIComponent(q)}&fast=${$('#fast').checked ? 1 : 0}&scope=${encodeURIComponent(scope)}`);
+    const d = await api(`/api/ask?q=${encodeURIComponent(q)}&fast=${$('#fast').checked ? 1 : 0}&scope=${encodeURIComponent(scope)}&group=${encodeURIComponent(state.group || '')}`);
     const scopeTxt = d.scope && Object.keys(d.scope).length ? ' · 范围 ' + Object.values(d.scope).join('›') : '';
     el.remove(); addMsg('ai', d.answer + `\n\n[${d.mode} · ${d.took_ms} ms${d.found ? '' : ' · 未命中'}${scopeTxt} ]`, d.sources);
   } catch (e) { el.remove(); addMsg('ai', '请求失败：' + e.message); }
@@ -264,6 +271,64 @@ function settingsModal() {
   });
 }
 
+async function groupsModal() {
+  let d;
+  try { d = await api('/api/groups'); } catch (e) { return toast('获取群列表失败：' + e.message); }
+  const cfg = d.configured || [];
+  const avail = (d.available || []).filter(g => !g.configured);
+  const cfgHtml = cfg.length ? cfg.map(g =>
+    `<div class="grow-row"><span>${esc(g.display)} <span class="muted">${esc(g.qq_group)}${g.files != null ? ' · ' + g.files + ' 份' : ''}</span></span>
+     <button class="btn small warn" data-remove="${esc(g.code)}">移除</button></div>`).join('')
+    : '<div class="muted">尚未配置任何群</div>';
+  const availHtml = avail.length ? avail.map(g =>
+    `<div class="grow-row"><span>${esc(g.name)} <span class="muted">${esc(g.group_id)}</span></span>
+     <button class="btn small primary" data-add-gid="${esc(g.group_id)}" data-add-name="${esc(g.name)}">添加</button></div>`).join('')
+    : (d.online ? '<div class="muted">本 QQ 加入的其它群为空</div>'
+                : '<div class="muted">QQ 未在线，无法列出可添加群；请先扫码登录，或手动填入群号添加。</div>');
+  modal(`<div class="dialog-head"><h3>群聊管理</h3><span class="link dialog-close" id="gm-close">关闭 ✕</span></div>
+    <div class="muted">这里管理「搜索群文件」的群聊范围。新增的群会在下次「刷新来源」（需 QQ 在线）时拉取文件；移除的群会在在线刷新时从索引清理。</div>
+    <h4 style="margin:14px 0 6px">已纳入搜索池（${cfg.length}）</h4>
+    <div class="grow-list">${cfgHtml}</div>
+    <h4 style="margin:14px 0 6px">可添加（本 QQ 加入的群）</h4>
+    <div class="grow-list">${availHtml}</div>
+    <h4 style="margin:14px 0 6px">手动添加群号</h4>
+    <div class="row gap">
+      <input id="gm-gid" placeholder="群号（纯数字）" style="flex:1">
+      <input id="gm-name" placeholder="显示名（可选）" style="flex:1">
+      <button class="btn primary small" id="gm-add">添加</button>
+    </div>
+    <div class="muted" id="gm-msg" style="margin-top:8px"></div>`);
+  $('#gm-close').onclick = closeModal;
+  $('#dialog').querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await api('/api/groups/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code: b.dataset.remove})});
+      if (!r.ok) return toast('移除失败：' + (r.error || ''), 6000);
+      toast('已移除，点「刷新来源」清理该群索引', 6000);
+      await groupsModal();
+    } catch (e) { toast('移除失败：' + e.message); }
+  });
+  $('#dialog').querySelectorAll('[data-add-gid]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const r = await api('/api/groups/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code:'', display: b.dataset.addName, qq_group: b.dataset.addGid})});
+      if (!r.ok) return toast('添加失败：' + (r.error || ''), 6000);
+      toast('已添加，点「刷新来源」拉取该群文件', 6000);
+      await groupsModal();
+    } catch (e) { toast('添加失败：' + e.message); }
+  });
+  $('#gm-add').onclick = async () => {
+    const gid = ($('#gm-gid').value || '').trim();
+    if (!gid) return toast('请填写群号');
+    try {
+      const r = await api('/api/groups/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code:'', display: ($('#gm-name').value || '').trim(), qq_group: gid})});
+      if (!r.ok) return toast('添加失败：' + (r.error || ''), 6000);
+      toast('已添加，点「刷新来源」拉取该群文件', 6000);
+      await groupsModal();
+    } catch (e) { toast('添加失败：' + e.message); }
+  };
+}
+
 $('#btn-login').onclick = () => window.open('/login', '_blank');
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';
@@ -288,6 +353,8 @@ $('#btn-download-category').onclick = () => {
 $('#btn-ask').onclick = () => ask($('#ask').value);
 $('#ask').onkeydown = (e) => { if (e.key === 'Enter') ask($('#ask').value); };
 $('#btn-settings').onclick = settingsModal;
+$('#btn-groups').onclick = groupsModal;
+$('#group-focus').onchange = () => { state.group = $('#group-focus').value; state.path = []; state.selected.clear(); state.kind = ''; state.kindOptions = []; reload(); };
 $('#btn-ask-search').onclick = () => {
   const q = ($('#search').value || '').trim();
   if (!q) return toast('先在搜索框输入查询，再点「问 AI」');

@@ -94,6 +94,39 @@ def save_qq_groups(groups: list[dict]) -> dict:
     return cleaned
 
 
+def _qq_groups() -> dict:
+    return (CFG.setdefault("sources", {}).setdefault("qq", {})).setdefault("groups", {})
+
+
+def add_qq_group(code: str, display: str, qq_group: str) -> dict:
+    """增量新增一个 QQ 群到搜索池，保留既有群代号不重排（与 save_qq_groups 的整段覆盖不同）。
+
+    返回更新后的 groups 字典。群号必须是纯数字；代号留空或冲突时自动生成 gN。
+    """
+    gid = str(qq_group or "").strip()
+    if not gid.isdigit():
+        raise ValueError("群号必须是纯数字")
+    groups = _qq_groups()
+    code = str(code or "").strip()
+    if not code or code in groups:
+        i = len(groups) + 1
+        while f"g{i}" in groups:
+            i += 1
+        code = f"g{i}"
+    name = str(display or "").strip() or f"群{gid}"
+    groups[code] = {"display": name, "qq_group": gid}
+    write_json(CONFIG_PATH, CFG)
+    return dict(groups)
+
+
+def remove_qq_group(code: str) -> dict:
+    """从搜索池移除一个 QQ 群（按代号）。返回更新后的 groups 字典。"""
+    groups = _qq_groups()
+    groups.pop(str(code or "").strip(), None)
+    write_json(CONFIG_PATH, CFG)
+    return dict(groups)
+
+
 def setup_done() -> bool:
     return state("setup_done.json").is_file()
 

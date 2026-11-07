@@ -168,13 +168,16 @@ def _labels(x: dict, key: str) -> list[str]:
     return [str(v or "") or "未分类"]
 
 
-def tree(cat: dict, dim: str, node: list[str]) -> list[dict]:
+def tree(cat: dict, dim: str, node: list[str], group: str = "") -> list[dict]:
     levels = DIMS.get(dim, ["subject"])
     if len(node) >= len(levels):
         return []
     key = levels[len(node)]
+    gf = str(group or "").strip()
     bucket: dict[str, dict] = {}
     for x in items(cat):
+        if gf and str(x.get("group", "")) != gf:
+            continue
         if not _matches(x, dim, node):
             continue
         # 多值字段（tags）会让同一条目落进多个桶，这正是「不漏项」的关键
@@ -190,13 +193,16 @@ def tree(cat: dict, dim: str, node: list[str]) -> list[dict]:
 
 
 def query(cat: dict, dim: str, node: list[str], q: str = "", limit: int = 200,
-          with_total: bool = False, kind: str = "", cfg: dict | None = None):
+          with_total: bool = False, kind: str = "", cfg: dict | None = None, group: str = ""):
     """按节点 + 查询词过滤。查询词会做同义/相关主题扩展，避免「搜高等代数只有 1 条」。"""
     q = (q or "").strip().lower()
     kind = (kind or "").strip()
+    gf = str(group or "").strip()
     terms = classify.expand_query(q, cfg or config.CFG) if q else []
     out = []
     for x in items(cat):
+        if gf and str(x.get("group", "")) != gf:
+            continue
         if not _matches(x, dim, node):
             continue
         if kind and str(x.get("kind", "")) != kind:

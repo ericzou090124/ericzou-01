@@ -17,6 +17,7 @@
   </div>
   <button id="btn-login" class="btn">QQ 登录</button>
   <button id="btn-refresh" class="btn">刷新来源</button>
+  <button id="btn-groups" class="btn">群聊</button>
   <button id="btn-settings" class="btn">设置</button>
 </header>
 
@@ -30,6 +31,10 @@
         <option value="subject" selected>按学科</option>
         <option value="kind">按类型</option>
         <option value="source">按来源</option>
+      </select>
+      <div class="row between" style="margin-top:10px"><span class="muted mini">群聊范围</span></div>
+      <select id="group-focus" class="mini">
+        <option value="">全部群聊</option>
       </select>
     </section>
     <section class="card grow">

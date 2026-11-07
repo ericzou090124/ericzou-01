@@ -152,6 +152,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(setup_status())
             if p == "/api/qq/groups":
                 return self._send({"ok": True, "groups": qq.list_groups()})
+            if p == "/api/groups":
+                # 群聊管理：返回已纳入搜索池的群 + 本 QQ 加入的可添加群（需在线）
+                groups_cfg = (config.CFG.get("sources", {}).get("qq", {}) or {}).get("groups", {})
+                st_groups = (SOURCE_STATUS.get("groups") or {})
+                configured = [{"code": c, "display": g.get("display", ""), "qq_group": g.get("qq_group", ""),
+                               "files": (st_groups.get(g.get("display", ""), {}) or {}).get("files")}
+                              for c, g in groups_cfg.items()]
+                available, on = [], qq.online()
+                if on:
+                    try:
+                        available = [{"group_id": g["group_id"], "name": g.get("name", ""),
+                                      "configured": any(str(v.get("qq_group", "")) == str(g["group_id"])
+                                                       for v in groups_cfg.values())}
+                                     for g in qq.list_groups()]
+                    except Exception:
+                        available = []
+                return self._send({"ok": True, "online": on, "configured": configured, "available": available})
             if p in ("/app.js", "/style.css"):
                 return self._file(p.lstrip("/"))
             if p == "/api/qqlogin/status":
@@ -186,13 +203,14 @@ class Handler(BaseHTTPRequestHandler):
                                    "download_cap": config.CFG.get("max_download_per_batch", 30)})
             if p == "/api/tree":
                 node = json.loads(q.get("node", ["[]"])[0])
-                return self._send({"ok": True, "children": catalog.tree(ensure(), q.get("dim", ["classify"])[0], node)})
+                return self._send({"ok": True, "children": catalog.tree(ensure(), q.get("dim", ["classify"])[0], node,
+                                                                        group=q.get("group", [""])[0])})
             if p == "/api/files":
                 node = json.loads(q.get("node", ["[]"])[0])
                 xs, total = catalog.query(ensure(), q.get("dim", ["classify"])[0], node,
                                          q.get("q", [""])[0], int(q.get("limit", ["200"])[0]),
                                          with_total=True, kind=q.get("kind", [""])[0],
-                                         cfg=config.CFG)
+                                         cfg=config.CFG, group=q.get("group", [""])[0])
                 return self._send({"ok": True, "items": xs, "total": total,
                                    "shown": len(xs), "truncated": total > len(xs)})
             if p == "/api/file":
@@ -211,7 +229,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     scope = []
                 r = ai.answer(q.get("q", [""])[0], ensure(),
-                              fast=q.get("fast", ["0"])[0] in ("1", "true"), scope=scope)
+                              fast=q.get("fast", ["0"])[0] in ("1", "true"), scope=scope,
+                              group=q.get("group", [""])[0])
                 r["ok"] = True
                 return self._send(r)
             if p == "/api/settings":
@@ -238,6 +257,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if p == "/api/refresh":
                 return self._send(refresh(bool(body.get("snapshot"))))
+            if p == "/api/groups/add":
+                try:
+                    groups = config.add_qq_group(str(body.get("code") or ""), str(body.get("display") or ""),
+                                                str(body.get("qq_group") or ""))
+                except ValueError as e:
+                    return self._send({"ok": False, "error": str(e)}, 400)
+                return self._send({"ok": True, "groups": groups})
+            if p == "/api/groups/remove":
+                groups = config.remove_qq_group(str(body.get("code") or ""))
+                return self._send({"ok": True, "groups": groups})
             if p == "/api/qqlogin/refresh":
                 return self._send(qqlogin.refresh_qrcode())
             if p == "/api/qqlogin/quick":
@@ -283,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(r)
             if p == "/api/ask":
                 r = ai.answer(body.get("q", ""), ensure(), fast=bool(body.get("fast")),
-                              scope=body.get("scope") or [])
+                              scope=body.get("scope") or [], group=body.get("group") or "")
                 r["ok"] = True
                 return self._send(r)
             if p == "/api/settings":

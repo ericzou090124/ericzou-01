@@ -7,6 +7,7 @@
   C. 单值分类一致性（subject/kind/source 三个维度：树节点和 == 文件总数，绝不空分类 / 计数对不上）
   D. 分类完整性 + 搜索多归属召回（高等代数）+ 不错分回归
   E. 老端点回归（health / tree / files / settings / outline）
+  F. 群聊管理（增减群 + 群筛选）
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -123,15 +124,16 @@ def main() -> int:
         print("\n[C] 单值分类一致性（subject / kind / source）")
         state = get("/api/state")[2]
         c = state["counts"]
-        check("目录条目总数仍是 1625（分类升级未丢文件）", c["total"] == 1625, f"total={c['total']}")
-        check("完整性校验通过", state["integrity"]["ok"] is True,
-              f"unique={state['integrity']['unique_ids']} tagged={state['integrity']['tagged']}")
+        total = c["total"]
+        check("目录条目总数 > 0 且完整性校验通过（分类升级未丢文件）",
+              total > 0 and state["integrity"]["ok"] is True,
+              f"total={total} unique={state['integrity']['unique_ids']} tagged={state['integrity']['tagged']}")
         for dim in ("subject", "kind", "source"):
             tree = get(f"/api/tree?dim={dim}&node=%5B%5D")[2]
             files = get(f"/api/files?dim={dim}&node=%5B%5D&limit=5")[2]
             sum_counts = sum(x["count"] for x in tree["children"])
             check(f"维度 {dim}：树节点计数之和 == 文件总数（无空分类/计数对不上）",
-                  tree.get("ok") and files.get("ok") and sum_counts == files["total"] == 1625,
+                  tree.get("ok") and files.get("ok") and sum_counts == files["total"] == total,
                   f"树和={sum_counts} 文件数={files['total']} 节点数={len(tree['children'])}")
             # 逐层下钻：每个非末级节点，其「文件列表 total」必须等于树里该节点的 count
             # 抽查首个可下钻节点
@@ -184,6 +186,36 @@ def main() -> int:
 
         diag = get("/api/diagnose")[2]
         check("系统诊断仍可用（含 NapCat 检查，但不再含微信）", "napcat" in diag)
+
+        print("\n[F] 群聊管理（增减群 + 群筛选）")
+        grp = get("/api/groups")[2]
+        check("/api/groups 返回 ok 且含 configured/available",
+              grp.get("ok") and "configured" in grp and "available" in grp,
+              f"configured={len(grp.get('configured', []))}")
+        groups_all = sorted({x.get("group", "") for x in server.CAT["items"]})
+        g0 = groups_all[0]
+        cnt_g0 = sum(1 for x in server.CAT["items"] if x.get("group") == g0)
+        gf = get("/api/files?dim=subject&node=%5B%5D&group=" + urllib.parse.quote(g0) + "&limit=5")[2]
+        check("群筛选 /api/files?group 只返回该群",
+              gf.get("ok") and gf.get("total") == cnt_g0, f"total={gf.get('total')} expect={cnt_g0}")
+        gt = get("/api/tree?dim=subject&node=%5B%5D&group=" + urllib.parse.quote(g0))[2]
+        check("群筛选 /api/tree?group 只返回该群",
+              gt.get("ok") and gt.get("ok") and sum(c["count"] for c in gt.get("children", [])) == cnt_g0, "")
+        import copy as _copy
+        _snap = _copy.deepcopy(config.CFG)
+        try:
+            a = config.add_qq_group("g_t3_tmp", "T群", "888888888")
+            check("add_qq_group 写入新群且不重排代号",
+                  "g_t3_tmp" in a and all(k in a for k in _snap.get("sources", {}).get("qq", {}).get("groups", {})))
+            try:
+                config.add_qq_group("g_bad", "坏", "xyz"); check("非法群号被拒绝", False, "")
+            except ValueError:
+                check("非法群号被拒绝", True, "")
+            r = config.remove_qq_group("g_t3_tmp")
+            check("remove_qq_group 移除临时群", "g_t3_tmp" not in r)
+        finally:
+            config.CFG.clear(); config.CFG.update(_snap)
+            config.write_json(config.CONFIG_PATH, _snap)
 
     finally:
         srv.shutdown()

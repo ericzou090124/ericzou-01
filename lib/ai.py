@@ -70,7 +70,7 @@ def _filters(q: str, cfg: dict) -> dict:
     return f
 
 
-_LABELS = {"domain": "领域", "subject": "科目", "kind": "类型"}
+_LABELS = {"domain": "领域", "subject": "科目", "kind": "类型", "group": "群聊"}
 
 
 def _scope_from_path(path) -> dict:
@@ -157,7 +157,8 @@ def _local_answer(q: str, hits: list[tuple[float, dict, str]]) -> str:
     return ("根据已入库资料：" + " ".join(parts)) if parts else "已检索到相关资料，请点开下方源文件索引查看。"
 
 
-def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | None = None) -> dict:
+def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | None = None,
+          group: str = "") -> dict:
     t0 = time.time()
     q = (q or "").strip()
     cfg = config.CFG
@@ -166,6 +167,10 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
                 "scope": _scope_from_path(scope), "took_ms": 0}
     cat = cat or catalog.load()
     f = _merge_filter(_scope_from_path(scope), _filters(q, cfg))
+    # 群聊范围：只在该群授权可见资料内检索与作答，不串到其它群
+    gf = str(group or "").strip()
+    if gf:
+        f["group"] = gf
     where = _where(f)
 
     if LIST_INTENT.search(q):

@@ -9,7 +9,7 @@
 [![Search](https://img.shields.io/badge/Search-SQLite_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](lib/index.py)
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
-[![Version](https://img.shields.io/badge/Version-v3.2.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v3.3.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-2E8B57?style=flat-square)](LICENSE)
 
 ---
@@ -58,6 +58,7 @@
 | 🛠️ **install 真的管 NapCat** | `install.bat` 内置 NapCat 安装自检：检测运行时 / 启动脚本 / WebUI / OneBot 配置，自动修复 `webui.json` 的 `host=::`（本机 127.0.0.1 拒绝连接的根因）并生成可回滚备份与 `state/napcat_setup.json` 报告；也可单独跑 `tools/setup_napcat.bat` |
 | 💾 **下载到 Obsidian 分类知识库** | 勾选文件 → 显式二次确认 → 自动下载、分类入库、生成摘要与多级大纲，并写入 Obsidian 知识库 |
 | 💬 **AI 问答（防臆造）** | 基于 FTS5 全文检索 + 本地/外部 LLM 作答，回答下方给出可点击的源文件索引；查不到如实说明，绝不编造 |
+| 🔀 **随时切换 / 增减搜索群聊（v3.3.0）** | 顶部「群聊」按钮在登录态下随时增删要搜索的群（在线自动列出本 QQ 加入的群，离线可手动填群号）；左侧「群聊范围」下拉按群收窄分类树 / 文件列表 / AI 问答，无需手改 `config.json` |
 
 ---
 
@@ -102,7 +103,8 @@
 ### Windows（推荐，双击即用）
 1. 下载并双击 [resource-manager-installer.bat](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat)（自动解压到 `C:\Users\<你>\resource-manager`）。
 2. 双击 `start.bat` 启动，浏览器自动打开 `http://127.0.0.1:8787`。
-3. 第一次用：点顶部「QQ 登录」扫码（无需打开 NapCat 控制台），再按「首次配置」向导勾选 QQ 群。
+3. 第一次用：点顶部「QQ 登录」扫码（无需打开 NapCat 控制台），再点「群聊」按钮勾选要管理的 QQ 群，然后点「刷新来源」把群文件元数据拉进来（只读，不下载任何文件）。
+4. **随时切换群聊**：登录状态下点顶部「群聊」即可增删要搜索的群，或在左侧「群聊范围」下拉里按群收窄检索与问答——无需手改 `config.json`。
 
 ### 从源码
 ```bash
