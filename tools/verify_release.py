@@ -107,16 +107,31 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def download(url: str) -> tuple[bytes, int]:
+    """CDN 偶发 RemoteDisconnected，做有界重试（0.5s / 1s / 2s）。"""
+    import time
+    last = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "resource-manager-verify"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return r.read(), r.status
+        except Exception as e:
+            last = e
+            if attempt < 3:
+                print(f"  ⟳ 下载重试 {attempt + 1}/3（{type(e).__name__}）")
+                time.sleep(0.5 * (2 ** attempt))
+    raise Failure(f"下载失败（重试 3 次仍不通）：{url} -> {type(last).__name__}: {last}")
+
+
 def fetch_assets(args, dl: Path) -> None:
     if args.from_github:
         base = f"{WEB}/releases/download/{args.tag}" if args.tag else f"{WEB}/releases/latest/download"
         for name in ASSETS:
             url = f"{base}/{name}"
-            req = urllib.request.Request(url, headers={"User-Agent": "resource-manager-verify"})
-            with urllib.request.urlopen(req, timeout=120) as r:
-                data = r.read()
+            data, status = download(url)
             (dl / name).write_bytes(data)
-            print(f"  ↓ {name:42s} {len(data):>9,d} B  ({r.status})")
+            print(f"  ↓ {name:42s} {len(data):>9,d} B  ({status})")
     else:
         dist = ROOT / "dist"
         for name in ASSETS:

@@ -433,3 +433,96 @@ Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点�
 - **资产上传修复**：`sync_github_releases.py` 初次按 `GET /releases?per_page=100` 列表查新建的 latest Release 未命中（列表缓存延迟）。改为 `GET /releases/tags/<tag>` 精确查询、失败再回退列表；并新增 `--assets-only` 只传资产模式。28 个 Release 正文（新建 1 / 更新 27 / 失败 0）与 3 个资产均已同步成功。
 - **发布后复跑审计**：28 标签 / 24 PASS / 4 KNOWN / 0 未修复失败，`v2.9.0` 全项 ✅ PASS（含自带 16 项自测）。
 - 根目录自解压安装器在全部文档定稿后重新生成，发布包 `dist/` 重新构建并幂等重传，保证 zip 内容与最终 main 一致。
+
+---
+
+## 迭代 v2.9.1 — 一键安装器双击失败的紧急修复（第 17 轮）
+
+时间：2026-11-07 15:02 (GMT+8)。用户截图报障：点击 Release 的「小白首选」安装器，黑窗口显示
+`'-ExecutionPolicy' is not recognized as an internal or external command`，随后「解压失败」。
+要求：修复后**自己下载并运行全套流程确保无 bug，再提交产物**。
+
+### 复现（真实下载 + 真实执行）
+
+从 `releases/latest/download/resource-manager-installer.bat` 下载（306,900 B），保存到临时目录，
+用 `subprocess.run(["cmd","/c", bat], RM_NO_LAUNCH=1, RM_INSTALL_TARGET=隔离目录)` 真实执行。
+退出码 1、目标目录 0 文件、stderr 与用户截图逐字一致 → 稳定复现。
+
+文件本身没问题：UTF-8 无 BOM、全 CRLF、35 个换行；第 8 行是中文 echo，第 9 行是 809 字节的长命令行。
+
+### 对照实验定位根因（5 组变体，逐字节改写 bat 后真实执行）
+
+| 变体 | 改动 | 结果 |
+| --- | --- | --- |
+| 原始 | — | `-ExecutionPolicy` 被当命令 |
+| A | 仅把第 8 行中文 echo 换成 ASCII | 仍失败，错误变成 `$b=[System.IO.File]::ReadAllText` |
+| B | 仅去掉 `chcp 65001` | 仍失败 |
+| C | A + B | 仍失败 |
+| D / E | 第 9 行换成**纯 ASCII 短命令** | `PS_OK` / 解压完成 ✅ |
+| F | 第 9 行换成纯 ASCII 的 `-EncodedCommand` 短载荷 | ✅ |
+| G / H | 完整解压逻辑经 `-EncodedCommand` 传入 | PS 真正执行了，但报 `marker-not-found` |
+
+**结论 1（用户遇到的报错）**：第 9 行的内联 `-Command "..."` 里含中文，在 `chcp 65001` 的 cmd 下
+多字节字符按 OEM/GBK 解析，GBK 双字节字符的低字节可落在 0x22/0x7C 等 ASCII 特殊字符上，
+造成**双引号配对错乱、整行被拆断**；拆出来的第二段恰好以 `-ExecutionPolicy` 开头，
+于是 cmd 报「不是内部或外部命令」。中文行是否保留只影响「从哪里拆」，不影响「一定会拆」。
+此前所有发布前自测都是用 Python 解 base64 + CRC 校验，**从未让 cmd 真正执行过 .bat**，所以漏掉了。
+
+**结论 2（隐藏更深）**：`BAT_HEADER` 里 `$m='__M_P__'+'__M_S__'` 是占位符，`main()` 从未把它
+替换成真实标记 `'RMX1_'+'PAYLOAD_BOUNDARY_9F3A'`。实验 G 证明：即使命令行能跑通，PS 也必然
+`marker-not-found` → 解压失败。也就是说这个安装器自诞生起就没成功执行过完整解压逻辑。
+
+**顺带发现**：`RM_NO_LAUNCH=1` 分支在 `:done` 的 echo 之后没有 `exit /b`，会继续把标记行和
+30 万字节的 base64 payload 当命令逐行执行，刷一屏错误并以非 0 退出。
+
+### 修复
+
+1. `tools/build_installer.py` 重写。PS 脚本改为独立 Unicode 常量，**UTF-16LE + Base64 经
+   `-EncodedCommand` 传入**；bat 中所有命令行都是纯 ASCII，彻底绕开 cmd 的引号 / 管道 / 多字节解析。
+2. 标记表达式由 `main()` 注入，并新增 `verify_installer()` 构建期自检：命令行纯 ASCII、
+   必须是 `-EncodedCommand`、载荷纯 base64、PS 标记表达式与标记行一致、内嵌 zip 关键文件齐全 + CRC。
+3. 解压改用 .NET `System.IO.Compression.ZipFileExtensions::ExtractToFile`（中文文件名不乱码、
+   可覆盖写入），不再用 `Expand-Archive`；解压后校验 `server.py` 存在；所有分支 `exit /b` 显式终止。
+4. 输出改走 `[Console]::Out.WriteLine` + `$ProgressPreference=SilentlyContinue`，消除
+   `-EncodedCommand` 下的 CLIXML 结构化流刷屏。
+5. `tools/sync_github_releases.py` 新增 `--asset-tags v2.9.0`：**把修复版资产覆盖到历史 Release**，
+   避免有人点到旧版本仍下载到坏文件；v2.9.0 的 CHANGELOG 段落与 Release 正文加了醒目警示。
+
+### 新增 `tools/verify_release.py`（本轮最大价值）
+
+发行前 7 步端到端验证，全部隔离、绝不写真实 `state/`：
+① 取资产（本地 `dist/` 或 `--from-github` 真实直链，带 3 次退避重试）→ ② SHA256 校验 →
+③ **用 cmd 真实执行安装器**并断言退出码 0 / 无解析错误 / 无 CLIXML / 关键文件与中文名齐全 →
+④ 完整包解压 + `compileall` + `import server` → ⑤ 在**解压出来的目录**里用隔离 state + 随机空闲端口
+起真实 HTTP 服务，打 `/api/health /diagnose /tree /files /state` 与 `/ /app.js /style.css` →
+⑥ 真实 catalog 前后条数一致 → ⑦ 汇总。
+
+### 实测结果
+
+- 本地 `dist/`：7 步 ALL PASS（解压 69 文件、72 文件完整包、8 个 HTTP 端点全 200、catalog 1625 条不变）。
+- **GitHub latest 直链真实下载**：7 步 ALL PASS（325,247 B / 481,793 B / 191 B，SHA256 全部一致）。
+- **GitHub v2.9.0 历史 Release 真实下载**：7 步 ALL PASS（确认坏资产已被修复版覆盖）。
+- 首次远端下载时第三个文件遇到 CDN `RemoteDisconnected`，已给下载函数加 0.5/1/2s 退避重试后通过。
+- `smoke_test.py` ALL PASS（16 项）；`python -m py_compile` 4 个工具脚本通过。
+- 发布后全版本审计：**29 标签 / 25 PASS / 4 KNOWN / 0 未修复失败**，`v2.9.1` 全项 ✅。
+
+### GitHub 同步
+
+- `main` → `5b817da`，新标签 `v2.9.1`；29 个 tag ⊂ 29 个 Releases（新建 1 / 更新 28 / 失败 0），
+  `latest = v2.9.1`；3 个资产同时上传到 `v2.9.1` 与 `v2.9.0`，旧版坏附件已被覆盖。
+- 用户无需任何额外操作：直接从原来的 latest 直链重新下载一次即可。
+
+### 教训
+
+- **「Python 校验内嵌 zip 的 CRC」不等于「安装器能用」**。凡是交付给双击执行的 `.bat`，
+  发布前必须让 cmd 真的跑一遍，并检查退出码与输出；编码/命令行解析问题只有在真实宿主里才暴露。
+- bat 里的「命令行」必须保持纯 ASCII——中文只允许出现在 `echo` 的文本里；需要复杂逻辑就走
+  `-EncodedCommand` 或临时脚本文件，绝不要把带中文的长命令内联在 `-Command "..."` 里。
+- 生成脚本里的占位符必须有对应的注入 + 自检，否则会静默产出一个永远不能用的产物。
+- 「已发布的坏资产」不能只靠发新版解决：历史 Release 仍能被点到，应同步覆盖，并在正文里加警示。
+
+### 下一步（若继续）
+
+Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点；或为 README 补实际界面截图。
+发行链路现在多了一道硬门禁：`build_release_assets.py` → `verify_release.py --from-github`
+→ `sync_github_releases.py --apply --assets-dir dist`。
