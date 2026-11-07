@@ -16,8 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import (ai, catalog, config, config_validate, download, index, llm, napcat_launch,  # noqa: E402
-                 napcat_setup, qq, qqlogin, vault)
+from lib import (ai, catalog, config, config_validate, download, index, llm, localimport,  # noqa: E402
+                 napcat_launch, napcat_setup, qq, qqlogin, vault)
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -230,9 +230,18 @@ class Handler(BaseHTTPRequestHandler):
                     scope = []
                 r = ai.answer(q.get("q", [""])[0], ensure(),
                               fast=q.get("fast", ["0"])[0] in ("1", "true"), scope=scope,
-                              group=q.get("group", [""])[0])
+                              group=q.get("group", [""])[0], dim=q.get("dim", ["subject"])[0])
                 r["ok"] = True
                 return self._send(r)
+            if p == "/api/vault/status":
+                return self._send(vault.status(ensure()))
+            if p == "/api/vault/search":
+                return self._send(vault.search(q.get("q", [""])[0], ensure(),
+                                               group=q.get("group", [""])[0],
+                                               limit=int(q.get("limit", ["20"])[0])))
+            if p == "/api/local/scan":
+                # 只读盘点：本机已另存的 QQ 群文件中有多少能与目录元数据精确对上
+                return self._send(localimport.scan(ensure()))
             if p == "/api/settings":
                 return self._send({"ok": True, "settings": config.public_settings()})
             if p == "/api/outline":
@@ -312,7 +321,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(r)
             if p == "/api/ask":
                 r = ai.answer(body.get("q", ""), ensure(), fast=bool(body.get("fast")),
-                              scope=body.get("scope") or [], group=body.get("group") or "")
+                              scope=body.get("scope") or [], group=body.get("group") or "",
+                              dim=body.get("dim") or "subject")
                 r["ok"] = True
                 return self._send(r)
             if p == "/api/settings":
@@ -354,7 +364,70 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(index.optimize())
             if p == "/api/init":
                 return self._send({"ok": True, "created": vault.init(),
-                                   "outlines": vault.build_outlines(ensure())})
+                                   "outlines": vault.build_outlines(ensure()),
+                                   "vault": vault.status(ensure())})
+            if p == "/api/vault/init":
+                created = vault.init()
+                return self._send({"ok": True, "created": created,
+                                   "outlines": vault.build_outlines(ensure()),
+                                   "vault": vault.status(ensure())})
+            if p == "/api/vault/open":
+                # 在本机文件管理器里打开新库文件夹；失败只回传路径，不报错
+                opened, err = False, ""
+                try:
+                    import os
+                    os.startfile(str(vault.v()))  # noqa: S606 - 仅 Windows 本机、用户显式点击
+                    opened = True
+                except Exception as e:
+                    err = str(e)[:120]
+                return self._send({"ok": True, "opened": opened, "error": err,
+                                   "path": str(vault.v()), "vault": vault.status(ensure())})
+            if p == "/api/vault/import":
+                # 一键批量导入：显式确认 + 当前范围（或指定 ids），复用 download 的全部闸门。
+                # 离线 / QQNT 内核异常时自动改走「本机已另存文件」通道，链路不中断。
+                cat = ensure()
+                ids = [str(i) for i in (body.get("ids") or []) if i]
+                if not ids:
+                    try:
+                        node = json.loads(body.get("node", "[]") or "[]")
+                    except Exception:
+                        node = []
+                    cap = int(config.CFG.get("max_download_per_batch", 30))
+                    xs, _t = catalog.query(cat, body.get("dim") or "subject", node,
+                                           body.get("q") or "", 100000, with_total=True,
+                                           kind=body.get("kind") or "", cfg=config.CFG,
+                                           group=body.get("group") or "")
+                    ids = [x["id"] for x in xs if not x.get("downloaded")][:cap]
+                if SOURCE_STATUS.get("mode") == "snapshot" or not qq.online():
+                    pairs = localimport.pick(cat, ids)
+                    if not pairs:
+                        return self._send({"ok": False,
+                                           "error": "QQ 在线下载不可用，且所选范围内没有本机已另存的对应文件。"
+                                                    "可点「刷新来源」恢复在线，或把 QQ 群文件另存到"
+                                                    " config.json 的 local_import_dirs 目录后再试。",
+                                           "vault": vault.status(cat)})
+                    r = localimport.run(cat, pairs, bool(body.get("confirm")))
+                    r["source"] = "local_saved_file"
+                else:
+                    r = download.run(cat, ids, "selection", bool(body.get("confirm")), "", "")
+                    # 在线但直链内核异常时，同样用本地已另存文件兜底，不让链路断在这一步
+                    if not r.get("ok"):
+                        pairs = localimport.pick(cat, ids)
+                        if pairs:
+                            local_r = localimport.run(cat, pairs, bool(body.get("confirm")))
+                            if local_r.get("ok"):
+                                local_r["source"] = "local_saved_file_fallback"
+                                local_r["online_error"] = r.get("error") or ""
+                                r = local_r
+                r["vault"] = vault.status(cat)
+                r["counts"] = catalog.counts(cat)
+                return self._send(r)
+            if p == "/api/vault/import-local":
+                # 显式离线导入：按界面给出的 (id, path) 清单导入本机已另存的 QQ 群文件
+                cat = ensure()
+                r = localimport.run(cat, body.get("pairs") or [], bool(body.get("confirm")))
+                r["counts"] = catalog.counts(cat)
+                return self._send(r)
             if p == "/api/setup/config":
                 saved = config.save_qq_groups(body.get("groups") or [])
                 return self._send({"ok": True, "saved": len(saved)})

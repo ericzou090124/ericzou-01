@@ -15,8 +15,19 @@ CFG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def vault() -> Path:
+    """独立的新 Obsidian 库。默认 ~/Desktop/<vault_name>，绝不覆盖用户已有的资料库。
+
+    config.json 的 vault 留空即可在新机器上自动建同名新库；需要换位置时填绝对路径。
+    """
     v = (CFG.get("vault") or "").strip()
-    return Path(v) if v else Path.home() / "Desktop" / "资源管理"
+    if v:
+        return Path(v)
+    name = (CFG.get("vault_name") or "QQ群资料Obsidian库").strip() or "QQ群资料Obsidian库"
+    return Path.home() / "Desktop" / name
+
+
+def vault_name() -> str:
+    return vault().name
 
 
 def state(name: str) -> Path:

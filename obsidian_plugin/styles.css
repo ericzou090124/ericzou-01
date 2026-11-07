@@ -17,3 +17,9 @@
 .rm-ai-send { cursor: pointer; padding: 6px 12px; }
 .rm-ai-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .rm-ai-chip { font-size: 11px; padding: 3px 8px; border-radius: 14px; cursor: pointer; opacity: .85; }
+
+/* v3.4.0: vault status / scope filters / vault-only toggle */
+.rm-ai-status{font-size:11px;opacity:.75;padding:2px 0 6px}
+.rm-ai-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px}
+.rm-ai-select{max-width:120px;font-size:11px}
+.rm-ai-toggle{display:inline-flex;align-items:center;gap:3px;cursor:pointer;opacity:.85}

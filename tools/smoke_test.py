@@ -16,8 +16,11 @@
 - AI 问答（空问题优雅返回、退化路径命中、LLM 代理策略）
 - 配置自检（正常无 errors；坏配置报可读错误）
 - NapCat 自检 / QQ 登录页结构（无微信 / 无分类体系入口）
+- v3.4.0：四六级真题 AI 召回与 CET6/CET4 精准隔离、CET 分类、FTS 缓存连接不误关、
+  新库状态 / 库内检索、离线导入三道闸门（空清单 / 未确认 / 越界路径）
 """
 import os
+import sqlite3
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -421,11 +424,89 @@ def main():
             fail(f"[21] ai._pool group={_g} 数量不符")
     print(f"[21] AI 群范围 OK：_pool 按 group 严格过滤（{len(_groups_all)} 个群）")
 
+    # ---- v3.4.0：AI 维度感知 + 四六级真题召回（守护「明明有却说没有」）----
+    def _src_names(ans):
+        out = []
+        for s in (ans.get("sources") or []):
+            out.append((s.get("name") or "") if isinstance(s, dict) else str(s))
+        return out
+
+    r_cet = ai.answer("给我找一套四六级真题", cat, fast=True, scope=["英语"], dim="subject")
+    names_cet = _src_names(r_cet)
+    if not r_cet.get("found"):
+        fail("[22] 截图场景回归失败：「给我找一套四六级真题」在 subject=英语 下又答没有")
+    if not any("CET" in n.upper() for n in names_cet):
+        fail(f"[22] 四六级真题未召回真实 CET 文件：{names_cet[:5]}")
+    print(f"[22] 截图场景 OK：found=True，命中 {len(names_cet)} 份可点击源索引（含 CET 真题）")
+
+    r6 = ai.answer("CET6真题有哪些", cat, fast=True, scope=[], dim="subject")
+    n6 = _src_names(r6)
+    if not r6.get("found") or not n6:
+        fail("[22b] CET6 真题召回为空")
+    if any("CET4" in n.upper() for n in n6):
+        fail(f"[22b] CET6 查询混入 CET4 结果（精准召回退化）：{n6[:5]}")
+    if not all("CET6" in n.upper() for n in n6[:5]):
+        fail(f"[22b] CET6 查询前几条不是 CET6 文件：{n6[:5]}")
+    r4 = ai.answer("CET4真题有哪些", cat, fast=True, scope=[], dim="subject")
+    if any("CET6" in n.upper() for n in _src_names(r4)[:5]):
+        fail("[22b] CET4 查询混入 CET6 结果")
+    print(f"[22b] 精准召回 OK：CET6={len(n6)} 份、CET4={len(_src_names(r4))} 份，互不串味")
+
+    # ---- v3.4.0：CET / 题+解 必须归「试卷与解析」，不再错分为其他资料 ----
+    from lib import classify as _clf34
+    for _nm in ("2024年06月CET6题+解+音频.zip", "2022年12月CET4题+解+音频.zip"):
+        _, _sub, _knd = _clf34.classify({"folder": "", "name": _nm}, config.CFG)
+        if _knd != "试卷与解析":
+            fail(f"[23] CET 文件「{_nm}」错分为「{_knd}」（应 试卷与解析）")
+    _cet_rows = [x for x in cat["items"] if "CET" in x["name"].upper()]
+    _bad_cet = [x["name"] for x in _cet_rows if x.get("kind") != "试卷与解析"]
+    if _cet_rows and _bad_cet:
+        fail(f"[23] 真实目录里仍有 {len(_bad_cet)} 个 CET 文件未归试卷与解析：{_bad_cet[:3]}")
+    print(f"[23] CET 分类 OK：词面规则 + 真实目录 {len(_cet_rows)} 个 CET 文件全部归试卷与解析")
+
+    # ---- v3.4.0：新库状态 / 库内检索 / 离线导入闸门 ----
+    from lib import vault as _vault, localimport as _li
+    _vs = _vault.status(cat)
+    for _k in ("path", "name", "exists", "initialized", "total", "downloaded",
+               "pending", "notes", "assets", "outlines", "plugin", "by_kind", "structure"):
+        if _k not in _vs:
+            fail(f"[24] vault.status 缺字段 {_k}")
+    if _vs["name"] != config.vault_name():
+        fail(f"[24] 新库名不一致：{_vs['name']} != {config.vault_name()}")
+    _vq = _vault.search("四六级真题", cat, limit=5)
+    if "items" not in _vq or "answer" not in _vq:
+        fail("[24] /api/vault/search 背后检索结构异常")
+    if _vs["downloaded"] and _vs["notes"] and not _vq["found"]:
+        fail("[24] 库里已有笔记，但「四六级真题」库内检索未命中")
+    print(f"[24] 库状态 OK：{_vs['name']} 已入库 {_vs['downloaded']} / 笔记 {_vs['notes']}"
+          f" / 大纲 {_vs['outlines']}；库内检索 found={_vq['found']}")
+
+    # v3.4.0 修复：线程级只读连接不能被 close，同线程连续 3 次检索都必须正常
+    try:
+        for _i in range(3):
+            if not isinstance(index.search("高等数学", 5), list):
+                fail("[24b] 同线程重复检索返回结构异常")
+    except sqlite3.ProgrammingError as e:
+        fail(f"[24b] 同线程重复检索崩溃（缓存连接被关闭）：{e}")
+    print("[24b] 同线程连续 3 次 FTS 检索 OK（缓存连接不再被误关）")
+
+    _sc = _li.scan(cat)
+    if not _sc.get("ok") or not isinstance(_sc.get("files"), list):
+        fail("[25] /api/local/scan 背后盘点结构异常")
+    if _li.run(cat, [], True).get("ok"):
+        fail("[25] 离线导入空清单未拒绝")
+    if _li.run(cat, [{"id": "x", "path": "C:\\Windows\\win.ini"}], False).get("ok"):
+        fail("[25] 离线导入未确认却放行")
+    if _li.run(cat, [{"id": "x", "path": "C:\\Windows\\win.ini"}], True).get("ok"):
+        fail("[25] 离线导入放行了白名单之外的路径")
+    print(f"[25] 离线导入闸门 OK：白名单目录 {len(_sc['dirs'])} 个、"
+          f"可匹配 {_sc['matched']} 份；空清单 / 未确认 / 越界路径均拒绝")
+
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:
         cfg = config.CFG.get("ai", {}) or {}
         if cfg.get("endpoint") or cfg.get("api_key"):
-            r = ai.answer(cat, "请简要说明本库包含哪些科目？", scope=None)
+            r = ai.answer("请简要说明本库包含哪些科目？", cat, scope=None)
             if not isinstance(r, dict) or "answer" not in r:
                 fail("ai.answer 返回结构异常")
             print("[18] ai.answer OK")

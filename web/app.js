@@ -29,6 +29,7 @@ function nodeParam(path) { return encodeURIComponent(JSON.stringify(path)); }
 async function loadState() {
   const d = await api('/api/state');
   state.counts = d.counts; state.source = d.source;
+  window.__cap = d.download_cap || 30;
   const on = d.source.mode === 'live';
   const loginBtn = $('#btn-login');
   loginBtn.className = on ? 'btn' : 'btn warn';
@@ -231,7 +232,7 @@ async function ask(q) {
   $('#chat').appendChild(el);
   try {
     const scope = JSON.stringify(state.path);
-    const d = await api(`/api/ask?q=${encodeURIComponent(q)}&fast=${$('#fast').checked ? 1 : 0}&scope=${encodeURIComponent(scope)}&group=${encodeURIComponent(state.group || '')}`);
+    const d = await api(`/api/ask?q=${encodeURIComponent(q)}&fast=${$('#fast').checked ? 1 : 0}&scope=${encodeURIComponent(scope)}&group=${encodeURIComponent(state.group || '')}&dim=${encodeURIComponent(state.dim || 'subject')}`);
     const scopeTxt = d.scope && Object.keys(d.scope).length ? ' · 范围 ' + Object.values(d.scope).join('›') : '';
     el.remove(); addMsg('ai', d.answer + `\n\n[${d.mode} · ${d.took_ms} ms${d.found ? '' : ' · 未命中'}${scopeTxt} ]`, d.sources);
   } catch (e) { el.remove(); addMsg('ai', '请求失败：' + e.message); }
@@ -329,6 +330,91 @@ async function groupsModal() {
   };
 }
 
+// ---------- Obsidian 知识库：完整链路 ----------
+async function loadVault() {
+  try {
+    const v = await api('/api/vault/status');
+    $('#vault-path').textContent = `库：${v.path}` + (v.plugin ? ' · AI 插件已装' : '');
+    $('#vault-path').title = '点击复制库路径：' + v.path;
+    $('#vault-path').onclick = () => { navigator.clipboard.writeText(v.path); toast('库路径已复制，可在 Obsidian 里「打开文件夹作为库」'); };
+    let localHint = '';
+    try {
+      const ls = await api('/api/local/scan');
+      window.__local = ls;
+      if (ls.pending > 0) localHint = ` · <b>本地已另存 ${ls.pending} 份</b>（QQ 离线时可直接导入）`;
+    } catch (_) { /* 只读盘点失败不影响主链路 */ }
+    $('#vault-stat').innerHTML = `已入库 <b>${v.downloaded}</b> / ${v.total} 份 · 待导入 <b>${v.pending}</b> 份 · 笔记 <b>${v.notes}</b> 篇 · 大纲 <b>${v.outlines}</b> 页${localHint}`;
+    $('#vault-note').textContent = `自动分类目录：${v.structure}。导入需显式确认，单批最多 ${window.__cap || 30} 个；QQ 接口不可用时会自动改从本机已另存的群文件导入，链路不中断。`;
+  } catch (e) { $('#vault-stat').textContent = '库状态读取失败：' + e.message; }
+}
+
+function vaultImportModal() {
+  const cap = window.__cap || 30;
+  const pending = state.files.filter(f => !f.downloaded);
+  const preview = pending.slice(0, cap);
+  modal(`<div class="dialog-head"><h3>一键批量导入到 Obsidian</h3><span class="link dialog-close" id="vi-close">关闭 ✕</span></div>
+    <div class="muted">将按<b>当前筛选范围</b>（${state.path.length ? esc(state.path.join(' › ')) : '全部'}）导入尚未下载的文件，
+    单批最多 <b>${cap}</b> 个。导入后自动抽取正文、生成摘要，按「来源 / 群聊 / 领域 / 学科 / 类型」落盘，
+    并生成一一对应的预览笔记与多级大纲。</div>
+    <div class="list" style="margin-top:10px">${preview.length ? preview.slice(0, 12).map(x => `<div>· ${esc(x.name)}</div>`).join('') : '<div>当前页没有待下载文件</div>'}${preview.length > 12 ? `<div>… 其余 ${preview.length - 12} 个</div>` : ''}</div>
+    <label style="display:block;margin:12px 0 0"><input type="checkbox" id="vi-confirm"> 我已确认：这会真实写入文件到本机 Obsidian 库（QQ 离线时用已另存的群文件）</label>
+    <div class="actions"><button class="btn" id="vi-cancel">取消</button><button class="btn primary" id="vi-ok">确认批量导入</button></div>
+    <div class="muted" id="vi-msg" style="margin-top:8px"></div>`);
+  $('#vi-close').onclick = closeModal; $('#vi-cancel').onclick = closeModal;
+  $('#vi-ok').onclick = async () => {
+    if (!$('#vi-confirm').checked) return $('#vi-msg').textContent = '请先勾选确认。';
+    const btn = $('#vi-ok'); btn.disabled = true; btn.textContent = '导入中…';
+    $('#vi-msg').textContent = '正在下载、抽取正文、自动分类入库（可能需要一点时间）…';
+    try {
+      const r = await api('/api/vault/import', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({confirm:true, ids:[], dim:state.dim,
+          node:JSON.stringify(state.path), q:state.search||'', group:state.group||'', kind:state.kind||''})});
+      if (!r.ok) { $('#vi-msg').textContent = '导入未完成：' + (r.error || '未知原因'); btn.disabled=false; btn.textContent='确认批量导入'; return; }
+      closeModal();
+      toast(`批量导入完成：成功 ${r.succeeded}/${r.attempted} 个，已自动分类入库并生成笔记与大纲${r.note ? ' · '+r.note : ''}`, 8000);
+      state.selected.clear(); await loadState(); await reload(); await loadVault();
+    } catch (e) { $('#vi-msg').textContent = '导入失败：' + e.message; btn.disabled=false; btn.textContent='确认批量导入'; }
+  };
+}
+
+function vaultSearchModal() {
+  modal(`<div class="dialog-head"><h3>库内 AI 检索</h3><span class="link dialog-close" id="vq-close">关闭 ✕</span></div>
+    <div class="muted">只检索<b>已导入 Obsidian 库</b>（含正文与笔记）的资料，结果可直接点开预览笔记。</div>
+    <div class="row gap" style="margin-top:10px"><input id="vq-q" class="ask" placeholder="如：四六级真题 / 高等数学 / 复变函数" style="flex:1"><button class="btn primary small" id="vq-go">检索</button></div>
+    <div class="list" id="vq-list" style="margin-top:10px;max-height:300px">输入关键词开始检索…</div>`);
+  $('#vq-close').onclick = closeModal;
+  const go = async () => {
+    const q = ($('#vq-q').value || '').trim();
+    if (!q) return toast('请输入检索词');
+    $('#vq-list').textContent = '检索中…';
+    try {
+      const r = await api(`/api/vault/search?q=${encodeURIComponent(q)}&limit=20`);
+      $('#vq-list').innerHTML = r.found ? r.items.map(x =>
+        `<div class="srcitem" data-id="${esc(x.id)}" style="display:block;padding:5px 0;border-bottom:1px solid var(--line)">
+           <b>${esc(x.name)}</b><div class="muted">${esc(x.chain)} · ${esc(x.subject)} / ${esc(x.kind)}</div>
+           ${x.excerpt ? `<div class="muted">${esc(x.excerpt.slice(0,120))}…</div>` : ''}</div>`).join('')
+        : `<div class="muted" style="padding:8px">${esc(r.answer || '库内没有命中')}</div>`;
+      $('#vq-list').querySelectorAll('.srcitem').forEach(n => n.onclick = () => showPreview(n.dataset.id));
+    } catch (e) { $('#vq-list').textContent = '检索失败：' + e.message; }
+  };
+  $('#vq-go').onclick = go;
+  $('#vq-q').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+
+$('#btn-vault-import').onclick = vaultImportModal;
+$('#btn-vault-search').onclick = vaultSearchModal;
+$('#btn-vault-open').onclick = async () => {
+  try { const r = await api('/api/vault/open', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    toast(r.opened ? '已打开库文件夹：' + r.path : '库路径：' + r.path + '（可复制后在 Obsidian 里打开）', 7000);
+  } catch (e) { toast('打开失败：' + e.message); }
+};
+$('#btn-vault-init').onclick = async () => {
+  toast('正在初始化新库并重建多级大纲…', 4000);
+  try { await api('/api/vault/init', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    toast('完成：独立 Obsidian 库 + 预览笔记 + 多级大纲已就绪'); await loadVault();
+  } catch (e) { toast('初始化失败：' + e.message); }
+};
+
 $('#btn-login').onclick = () => window.open('/login', '_blank');
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';
@@ -379,6 +465,6 @@ async function checkSetup() {
 }
 
 (async () => {
-  try { await loadState(); await reload(); await checkSetup(); addMsg('ai', '已连接本地资源库。可以直接用口语提问，回答下方会给出可点击的源文件索引；查不到会如实说明。');
+  try { await loadState(); await reload(); await loadVault(); await checkSetup(); addMsg('ai', '已连接本地资源库。可以直接用口语提问（如「给我找一套四六级真题」），回答下方会给出可点击的源文件索引；查不到会如实说明。');
   } catch (e) { toast('初始化失败：' + e.message, 9000); }
 })();

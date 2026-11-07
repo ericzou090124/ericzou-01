@@ -52,13 +52,15 @@ KEY_FILES = (
     "docs/INSTALL.md", "docs/FEATURES.md", "web/index.html", "web/app.js",
     "web/login.html", "web/setup.html",
     "lib/index.py", "lib/ai.py", "lib/napcat_setup.py", "lib/classify.py",
-    "lib/catalog.py",
+    "lib/catalog.py", "lib/vault.py", "lib/localimport.py", "lib/download.py",
     "tools/smoke_test.py", "tools/test_v3.py", "tools/setup_napcat.bat",
 )
 API_PATHS = ("/api/health", "/api/state", "/api/tree?dim=subject&node=%5B%5D",
              "/api/tree?dim=kind&node=%5B%5D", "/api/tree?dim=source&node=%5B%5D",
              "/api/files?dim=subject&node=%5B%5D&limit=5",
-             "/api/qqlogin/status", "/api/napcat/setup")
+             "/api/qqlogin/status", "/api/napcat/setup",
+             "/api/vault/status", "/api/vault/search?q=%E5%9B%9B%E5%85%AD%E7%BA%A7",
+             "/api/local/scan", "/api/groups")
 STATIC_PATHS = ("/", "/app.js", "/style.css", "/login", "/setup")
 
 # 子进程引导脚本：在「解压出来的程序」里起服务，state/vault/端口全部隔离

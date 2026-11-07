@@ -8,6 +8,7 @@
   D. 分类完整性 + 搜索多归属召回（高等代数）+ 不错分回归
   E. 老端点回归（health / tree / files / settings / outline）
   F. 群聊管理（增减群 + 群筛选）
+  G. v3.4.0：主页 Obsidian 完整链路、库状态 / 库内检索、离线导入闸门、四六级与 CET 精准召回
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -216,6 +217,53 @@ def main() -> int:
         finally:
             config.CFG.clear(); config.CFG.update(_snap)
             config.write_json(config.CONFIG_PATH, _snap)
+
+        print("\n[G] v3.4.0 Obsidian 完整链路 / AI 智能 / 离线导入闸门")
+        # 主页必须能看见完整的四步链路
+        home_raw, _, _ = get("/")
+        home = home_raw.decode("utf-8", "replace")
+        for token in ("Obsidian 知识库", "一键批量导入", "库内 AI 检索", "自动分类入库", "vault-strip"):
+            check("主页链路含「" + token + "」", token in home, "")
+
+        vs = get("/api/vault/status")[2]
+        check("/api/vault/status 返回新库完整状态",
+              vs.get("ok") and vs.get("name") == config.vault_name()
+              and all(k in vs for k in ("downloaded", "notes", "assets", "outlines", "structure", "by_kind")),
+              f"name={vs.get('name')} downloaded={vs.get('downloaded')}")
+
+        vq = get("/api/vault/search?q=" + urllib.parse.quote("四六级真题") + "&limit=5")[2]
+        check("/api/vault/search 结构正确（只搜库内笔记）",
+              vq.get("ok") and isinstance(vq.get("items"), list) and "answer" in vq,
+              f"found={vq.get('found')} pool={vq.get('total')}")
+        if vs.get("downloaded") and vs.get("notes"):
+            check("库内已有笔记时能检索到资料", bool(vq.get("items")), f"matched={vq.get('matched')}")
+
+        ls = get("/api/local/scan")[2]
+        check("/api/local/scan 只读盘点可用",
+              ls.get("ok") and isinstance(ls.get("files"), list) and isinstance(ls.get("dirs"), list),
+              f"matched={ls.get('matched')} dirs={len(ls.get('dirs', []))}")
+
+        pair = ({"id": ls["files"][0]["id"], "path": ls["files"][0]["path"]}
+                if ls.get("files") else {"id": "none", "path": "none"})
+        before_dl = vs.get("downloaded")
+        gate = post("/api/vault/import-local", {"confirm": False, "pairs": [pair]})
+        check("离线导入未确认时拒绝（confirm 闸门）", gate.get("ok") is False)
+        gate2 = post("/api/vault/import-local", {"confirm": True,
+                                                 "pairs": [{"id": "none", "path": "C:\\Windows\\win.ini"}]})
+        check("离线导入拒绝白名单之外的路径", gate2.get("ok") is False)
+        check("闸门测试不改动库状态", get("/api/vault/status")[2].get("downloaded") == before_dl, "")
+
+        ask = post("/api/ask", {"q": "给我找一套四六级真题", "scope": ["英语"],
+                                "dim": "subject", "fast": True})
+        srcs = [s.get("name", "") if isinstance(s, dict) else str(s) for s in ask.get("sources", [])]
+        check("AI 修复：subject=英语 下问四六级真题不再答「没有」",
+              ask.get("found") is True and any("CET" in n.upper() for n in srcs),
+              f"found={ask.get('found')} sources={len(srcs)}")
+        cet6 = get("/api/ask?q=" + urllib.parse.quote("CET6真题有哪些") + "&dim=subject&fast=1")[2]
+        n6 = [s.get("name", "") if isinstance(s, dict) else str(s) for s in cet6.get("sources", [])]
+        check("AI 精准召回 CET6 不混入 CET4",
+              cet6.get("found") is True and n6 and all("CET6" in n.upper() for n in n6[:5]),
+              f"{n6[:3]}")
 
     finally:
         srv.shutdown()

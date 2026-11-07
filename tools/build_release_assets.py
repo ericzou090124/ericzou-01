@@ -40,7 +40,7 @@ REQUIRED_IN_ZIP = (
     "tools/setup_napcat.py", "tools/setup_napcat.bat", "tools/reclassify.py",
     "web/index.html", "web/app.js", "web/login.html", "web/setup.html",
     "lib/index.py", "lib/napcat_setup.py", "lib/classify.py", "lib/catalog.py",
-    "lib/vault.py",
+    "lib/vault.py", "lib/localimport.py", "lib/ai.py", "lib/download.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 
@@ -58,9 +58,16 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
   2) 双击 start.bat
        会自动启动本地服务，并打开浏览器到 http://127.0.0.1:8787
        第一次使用：install.bat 会自动检测并修好 NapCat 配置；点顶部「QQ 登录」
-       在页面上直接扫码（不用打开任何 NapCat 控制台），再在「首次配置」向导里勾选 QQ 群即可。
-       分类是内容驱动的：学生课程群和工作资料群都能自动精细归类。左侧「分类大纲」
-       可按学科 / 类型 / 来源切换查看，计数与文件总数严格一致、不会出现空分类。
+       在页面上直接扫码（不用打开任何 NapCat 控制台），再用顶栏「群聊」按钮
+       增删 / 确认要搜索的 QQ 群，点「刷新来源」即可；不用手改任何配置文件。
+
+  3) 主页「Obsidian 知识库」卡片就是完整链路：
+       ① 左侧「分类整理」按学科 / 类型 / 来源逐级下钻（计数严格一致、无空分类）
+       ② 点「一键批量导入到 Obsidian」并勾选确认
+       ③ 自动抽取正文、按「来源/群聊/领域/学科/类型」分类入库，生成预览笔记与多级大纲
+       ④ 点「打开库文件夹」在 Obsidian 里打开新库，用「库内 AI 检索」或右侧栏 AI 搜索提问
+       新库默认在 桌面\\QQ群资料Obsidian库，是独立新库，不覆盖你原有的笔记库。
+       QQ 群文件直链不可用时，会自动改从本机已另存的群文件导入，链路不中断。
 
 【只想一键装好？】
   本压缩包里的 resource-manager-installer.bat 也可以直接双击，

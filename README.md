@@ -9,7 +9,7 @@
 [![Search](https://img.shields.io/badge/Search-SQLite_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](lib/index.py)
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
-[![Version](https://img.shields.io/badge/Version-v3.3.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v3.4.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-2E8B57?style=flat-square)](LICENSE)
 
 ---
@@ -17,7 +17,7 @@
 > [!TIP]
 > **🚀 第一次来？3 分钟跑起来，完全不用命令行**
 >
-> ① [⬇️ 下载一键安装器（Windows，双击即用）](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat) → ② **下载完直接双击它** → ③ 浏览器自动打开 `http://127.0.0.1:8787`，按页面「首次配置」向导点 3 下 → 完成。
+> ① [⬇️ 下载一键安装器（Windows，双击即用）](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat) → ② **下载完直接双击它** → ③ 浏览器自动打开 `http://127.0.0.1:8787`：顶栏「群聊」增删 QQ 群，左侧「分类整理」，主页「Obsidian 知识库」卡片一键批量导入并自动分类，右侧「AI 问答」直接提问，完成。
 >
 > 想把仓库全部内容拿下来：[📦 完整内容包 ZIP](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-full.zip) · [全部 Releases](https://github.com/ericzou090124/ericzou-01/releases) · **[📖 零基础图文教程（下载 → 安装 → 配置 → 下载资料 → AI 问答 → Obsidian 完整闭环）](docs/INSTALL.md)**
 
@@ -42,7 +42,7 @@
 - **本地模型或外部 API 都行**：默认指向本机推理服务（Bonsai2，自动 `disable_thinking`），也可切任意 OpenAI 兼容接口；模型挂了自动降级为纯本地检索，不编造答案。
 - **Obsidian 独立新库**：自动生成独立 Obsidian 库（带多级大纲 MOC 与 AI 侧边栏插件），**不碰你原有的任何笔记库**。
 
-实测数据：3 个 QQ 群、1641 条原始清单去重后 **1625 条 / 约 12.73 GB**，覆盖 29 个学科、13 种资源类型、59 个多归属主题标签。分类升级后**条目一条不少**（`catalog.verify_integrity()` 门禁）。
+实测数据：3 个 QQ 群、1642 条原始清单去重后 **1626 条 / 约 12.73 GB**，覆盖 29 个学科、13 种资源类型、59 个多归属主题标签。分类升级后**条目一条不少**（`catalog.verify_integrity()` 门禁）。v3.4.0 已实测把 20 份真实文件完整导入新 Obsidian 库（20 份原文件 / 20 篇笔记 / 294 页大纲 / 库内 AI 检索全部命中）。
 
 ---
 
@@ -58,7 +58,27 @@
 | 🛠️ **install 真的管 NapCat** | `install.bat` 内置 NapCat 安装自检：检测运行时 / 启动脚本 / WebUI / OneBot 配置，自动修复 `webui.json` 的 `host=::`（本机 127.0.0.1 拒绝连接的根因）并生成可回滚备份与 `state/napcat_setup.json` 报告；也可单独跑 `tools/setup_napcat.bat` |
 | 💾 **下载到 Obsidian 分类知识库** | 勾选文件 → 显式二次确认 → 自动下载、分类入库、生成摘要与多级大纲，并写入 Obsidian 知识库 |
 | 💬 **AI 问答（防臆造）** | 基于 FTS5 全文检索 + 本地/外部 LLM 作答，回答下方给出可点击的源文件索引；查不到如实说明，绝不编造 |
-| 🔀 **随时切换 / 增减搜索群聊（v3.3.0）** | 顶部「群聊」按钮在登录态下随时增删要搜索的群（在线自动列出本 QQ 加入的群，离线可手动填群号）；左侧「群聊范围」下拉按群收窄分类树 / 文件列表 / AI 问答，无需手改 `config.json` |
+| 🧭 **AI 搜索智能（v3.4.0）** | 维度感知范围映射 + 口语别名扩展（「四六级真题」→ CET / CET4 / CET6 / 题+解）+ 分级降级 + 具体编号精准召回。实测 `CET6真题有哪些` 只返回 7 份 CET6，不会再出现「明明有却说没有」 |
+| 🗂️ **Obsidian 完整链路（v3.4.0）** | 主页醒目展示「分类整理 → 一键批量导入 → 自动分类入库 → Obsidian 打开 + AI 检索」，一屏看完、一按钮跑完；新库独立、自动分类、自动生成笔记与大纲 |
+| 📴 **离线导入兜底（v3.4.0）** | QQNT 群文件内核异常、在线直链拿不到时，自动从本机已另存的 QQ 群文件导入；只认白名单目录 + 文件名精确匹配 + 显式确认，链路不中断 |
+
+---
+
+## 完整链路：分类整理 → Obsidian → AI 检索
+
+v3.4.0 把这条线做成主页上一条看得见、点得动的链路（「Obsidian 知识库」卡片）：
+
+```
+① 分类整理          ② 一键批量导入        ③ 自动分类入库              ④ Obsidian 打开 + AI 检索
+学科/类型/来源  →    勾选或整类，显式确认  →  资源/来源/群聊/领域/学科/类型/  →  库内 AI 检索（只搜已入库笔记）
+计数严格一致        单批上限，绝不隐式全量   笔记/预览笔记.md + 大纲/多级 MOC     右侧栏 AI 搜索插件
+```
+
+- **新库独立**：默认 `~/Desktop/QQ群资料Obsidian库`（`config.json` 的 `vault_name` 可改），**绝不覆盖你原有的任何笔记库**。库里自带 `00-使用说明`、`00-批量导入指南`、`00-AI检索说明` 和 AI 插件。
+- **自动分类**：导入后自动抽取正文、生成摘要，按「来源 / 群聊 / 领域 / 学科 / 类型」落盘，同时生成一一对应的预览笔记（含真实分类 frontmatter）与 294 页多级大纲；已下载条目在大纲里优先列出，可直接点开。
+- **库内 AI 检索**：`GET /api/vault/search` 与插件「库内检索」只检索已导入本库的资料，返回笔记 wikilink、分类链与正文片段；主页「库内 AI 检索」按钮同样可直接用。
+- **离线不断链**：如果 NapCat / QQNT 的 `get_group_file_url` 内核异常，一键批量导入会自动改走 `lib/localimport.py` 的本地另存文件通道。把 QQ 群文件另存到 `config.json` 的 `local_import_dirs`（支持 `{home}` / `{desktop}` / `{root}` / `{workspace}` 占位符）即可；`GET /api/local/scan` 可先盘点有多少能对上。
+- **闸门不放松**：无论走哪条通道，都必须 `confirm=true`、显式文件清单、扩展名白名单、目录白名单和单批上限（`max_download_per_batch`），原文件只复制不移动不删除。
 
 ---
 
@@ -71,7 +91,7 @@
 - **来源（source）**：`来源 → 群 → 文件夹` 三级，点进去即可按群内真实目录逐级下钻。
 - **多归属标签**：主学科 + 命中领域 + 类型 + 相关主题别名，仅用于搜索召回扩展。
 
-> **v3.2.0 修复的核心 bug**：旧版用多值 `genre/topic/modality` 作树维度，同一文件会被重复计入多个树桶，导致「节点计数之和 ≠ 文件总数」「点了进去却是空」「严重错分」。新版改为纯单值维度，并新增 `catalog.verify_tree_consistency()` 门禁——实测三个维度子节点计数之和都严格等于 1625。
+> **v3.2.0 修复的核心 bug**：旧版用多值 `genre/topic/modality` 作树维度，同一文件会被重复计入多个树桶，导致「节点计数之和 ≠ 文件总数」「点了进去却是空」「严重错分」。新版改为纯单值维度，并新增 `catalog.verify_tree_consistency()` 门禁——实测三个维度子节点计数之和都严格等于 1626。
 
 > **不错分**：裸扩展名 `.ppt` 已从词库剔除（这是「销售报表 .pptx 被错判成课件资源」的根因）；关键词按长度加权。实测「流体力学I期末试题」→ 大学物理 / 试卷与解析，销售报表 `.pptx` 不再判课件。
 
@@ -81,11 +101,11 @@
 
 打开 `http://127.0.0.1:8787` 后，界面只保留三件事：
 
-1. **分类整理**（左栏「分类大纲」）：用顶部下拉在「按学科 / 按类型 / 按来源」之间切换；点节点逐级下钻。每个节点的数字就是该分类下的文件数，**加起来一定等于总数，不会出现空分类**。
-2. **下载到 Obsidian**：主区勾选文件 → 点「下载已选」；或在某个分类下点「整类下载」（会要求你原样输入节点名二次确认）。下载前必须显式确认。
-3. **AI 问答**（右栏）：直接口语提问（如「高数期末真题有哪些？」），回答下方列出可点击的源文件索引；查不到会如实说明。
+1. **分类整理**（左栏）：用「分类方式」下拉在「按学科 / 按类型 / 按来源」之间切换，用「群聊范围」下拉按群收窄；点节点逐级下钻。每个节点的数字就是该分类下的文件数，**加起来一定等于总数，不会出现空分类**。
+2. **下载到 Obsidian**：主区勾选文件 → 点「下载已选」，或直接点主页「Obsidian 知识库」卡片的「一键批量导入」。下载前必须显式确认，导入后自动分类入库。
+3. **AI 问答**（右栏）：直接口语提问（如「给我找一套四六级真题」），回答下方列出可点击的源文件索引；查不到会如实说明。卡片上的「库内 AI 检索」只搜已导入的笔记。
 
-其余只剩必要的 **QQ 登录 / 刷新来源 / 设置** 三个按钮（首次使用会顶部出现「首次配置」引导）。
+其余只剩必要的 **群聊 / QQ 登录 / 刷新来源 / 设置** 按钮：「群聊」可随时增减、切换要搜索的 QQ 群，不用手改 `config.json`。
 
 ---
 
@@ -103,8 +123,7 @@
 ### Windows（推荐，双击即用）
 1. 下载并双击 [resource-manager-installer.bat](https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat)（自动解压到 `C:\Users\<你>\resource-manager`）。
 2. 双击 `start.bat` 启动，浏览器自动打开 `http://127.0.0.1:8787`。
-3. 第一次用：点顶部「QQ 登录」扫码（无需打开 NapCat 控制台），再点「群聊」按钮勾选要管理的 QQ 群，然后点「刷新来源」把群文件元数据拉进来（只读，不下载任何文件）。
-4. **随时切换群聊**：登录状态下点顶部「群聊」即可增删要搜索的群，或在左侧「群聊范围」下拉里按群收窄检索与问答——无需手改 `config.json`。
+3. 第一次用：点顶部「QQ 登录」扫码（无需打开 NapCat 控制台），再用顶栏「群聊」按钮增删 / 确认要搜索的 QQ 群，然后点「刷新来源」。
 
 ### 从源码
 ```bash
@@ -140,8 +159,13 @@ python server.py                      # 浏览器打开 http://127.0.0.1:8787
 | `/api/tree?dim=subject\|kind\|source&node=[]` | GET | 单值分类树（节点计数之和 == 文件总数） |
 | `/api/files?dim=...&node=[]&q=&limit=&kind=` | GET | 某分类/搜索下的文件列表（含总数） |
 | `/api/file?id=` | GET | 单文件元数据 + 正文片段 |
-| `/api/ask?q=&fast=&scope=` | GET/POST | AI 问答（防臆造） |
+| `/api/ask?q=&fast=&scope=&dim=&group=` | GET/POST | AI 问答（防臆造、维度感知范围、群范围、别名扩展） |
 | `/api/download` | POST | 显式确认后下载到 Obsidian（必须 confirm=true） |
+| `/api/vault/status` · `/api/vault/search` | GET | 新库状态 / 库内 AI 检索（只搜已入库笔记） |
+| `/api/vault/init` · `/api/vault/open` | POST | 初始化并重建大纲 / 在文件管理器打开库 |
+| `/api/vault/import` · `/api/vault/import-local` | POST | 一键批量导入（离线自动走本地兜底） / 显式本地另存文件导入 |
+| `/api/local/scan` | GET | 只读盘点本机已另存、且能与目录元数据对上的文件 |
+| `/api/groups` · `/api/groups/add` · `/api/groups/remove` | GET/POST | 登录态下随时增删 / 切换搜索群聊 |
 | `/api/refresh` | POST | 只读刷新来源元数据（不下载） |
 | `/api/reclassify` | POST | 词库升级后原地重算分类（只改分类字段） |
 | `/api/qqlogin/*` | GET/POST | QQ 登录二维码、快速登录、恢复在线 |
@@ -157,6 +181,9 @@ python server.py                      # 浏览器打开 http://127.0.0.1:8787
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `port` | `8787` | 本地服务端口（只监听 127.0.0.1） |
+| `vault` · `vault_name` | 空 / `QQ群资料Obsidian库` | 独立新库路径（`vault` 填绝对路径可换位置） |
+| `local_import_dirs` | 桌面 / 工作区 inbox | 离线兜底允许读取的本地另存目录，支持 `{home}` `{desktop}` `{root}` `{workspace}` 占位符 |
+| `search.phrase_expansions` · `search.find_intent` | 四六级 / 有哪些 | 口语别名展开与确定性清单意图词 |
 | `sources.qq.groups` | 三个示例群 | 要管理的 QQ 群（`display` + `qq_group`） |
 | `allowed_ext` | 文档/表格/图片/压缩包 | 允许进入目录的文件扩展名 |
 | `max_download_per_batch` | `30` | 单批下载上限 |
@@ -192,10 +219,18 @@ A：微信没有列出群文件全目录的开放接口，且聊天库加密、�
 **Q：没装 jieba / wcferry / pymupdf 能跑吗？**
 A：能。三者都是可选增强：jieba 缺失回退 3-gram，pymupdf 缺失 PDF 只登记元数据。启动自检会把它们列为提醒而非错误。
 
+**Q：AI 说没有四六级真题，可我明明在群里见过？**
+A：`v3.4.0` 已修复。根因是范围过滤器把「英语」按领域而非学科过滤、以及 `CET6题+解` 这类文件名没被识别成真题。现在「四六级真题」会自动展开到 CET / CET4 / CET6 / 题+解，严格范围无结果时逐级放宽并如实标注；实测能列出 21 份真实文件。
+
+**Q：QQ 登录正常但下载一直失败？**
+A：若报 `get_group_file_url` 内核异常，属本机 QQNT / NapCat 环境问题，不是分类或界面代码问题。`v3.4.0` 会自动改走本地另存文件通道：把群文件另存到 `config.json` 的 `local_import_dirs` 目录，主页「一键批量导入」即可继续完成入库、笔记与大纲。
+
 ---
 
 ## 版本历史（摘要）
 
+- **v3.4.0**：修复四六级真题 AI 漏检与 CET 错分；AI 搜索智能（维度感知 / 别名扩展 / 分级降级 / 具体编号精准召回）；新建独立 Obsidian 库、铺清主页完整链路、库内 AI 检索与插件增强；离线导入兜底；实测 20 份真实文件全链路通过。
+- **v3.3.0**：登录态下随时增删 / 切换搜索群聊，群范围联动分类树、文件列表与 AI 问答。
 - **v3.2.0**：修复分类计数不一致/空分类/错分（多值 → 单值维度）；删除微信登录与分类体系；精简为「分类整理 / 下载到 Obsidian / AI 问答」三件事的简洁界面；服务启动不再阻塞。
 - **v3.1.0**：内容驱动的泛化分类，工作群资料也能精细归类。
 - **v3.0.0**：登录/安装/分类/微信四条链路实测修复。

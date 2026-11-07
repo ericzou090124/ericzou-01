@@ -99,7 +99,18 @@ def _insert(con: sqlite3.Connection, x: dict) -> None:
 
 
 def connect() -> sqlite3.Connection:
+    """返回本线程可复用的只读连接；若缓存的连接已被关闭则重建。
+
+    v3.4.0 修复：旧版 search() 在 finally 里 close() 了缓存连接，
+    同一线程第二次检索会抛 "Cannot operate on a closed database"。
+    """
     con = getattr(_CONN_LOCAL, "con", None)
+    if con is not None:
+        try:
+            con.execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            con = None
+            _CONN_LOCAL.con = None
     if con is None:
         con = _new_connection()
         _CONN_LOCAL.con = con
@@ -259,7 +270,7 @@ def search(q: str, limit: int = 20) -> list[dict]:
         cols = ("item_id", "title", "body", "meta", "downloaded", "note", "asset", "score")
         return [dict(zip(cols, r)) for r in rows]
     finally:
-        con.close()
+        pass  # 缓存连接由线程复用，绝不能在这里 close（同线程二次检索会崩）
 
 
 def count() -> int:
