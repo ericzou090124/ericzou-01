@@ -381,3 +381,7 @@
 - 执行结果：远端原有 4 个 Releases（v1.2.0~v1.2.3）→ **新建 23 + 更新 4 = 27 个 Releases，覆盖全部 27 个 tag，0 失败**；`make_latest` 显式指定 v2.8.0。
 - 仓库元信息：description 由占位「写点东西」改为项目定位一句话；homepage 指向 README；补充 13 个 topics（`obsidian` / `qq` / `wechat` / `knowledge-base` / `sqlite-fts5` / `local-first` …）提升可发现性。
 - **渲染修正**：主页初版用 `<div align="center">` 包裹标题与徽章，在 CommonMark 的 HTML block 规则下存在渲染歧义（参考仓库本身也无居中语法）。改为纯 Markdown 后，用 GitHub 官方 `POST /markdown`（`mode=gfm`）实测：H1×1、H2×16、`<table>`×13、徽章图片 6、折叠块 10、警示块与 Mermaid 均在，Markdown 字面量泄漏 0。
+
+### 最终复跑（v2.8.0 发布后）
+
+`v2.8.0` 标签推送后重新运行 `python tools/version_audit.py`，报告从发布前快照的 26 标签更新为 **27 标签：23 PASS / 4 KNOWN / 0 未修复失败，退出码 0**，其中 `v2.8.0` 全项 ✅ PASS（含自带 `smoke_test.py` 16 项）。前文的「26 标签」是发布前的审计快照记录，保留不改以反映当时的过程。`python tools/smoke_test.py` 复跑仍为 ALL PASS。

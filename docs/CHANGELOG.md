@@ -27,7 +27,7 @@
 
 ### 验证
 - `python tools/smoke_test.py` → **16 项 ALL PASS**。
-- `python tools/version_audit.py` → 26 个标签：22 PASS / 4 KNOWN（已提供补丁）/ **0 未修复失败**，退出码 0。
+- `python tools/version_audit.py` → **27 个标签全部覆盖**：23 PASS / 4 KNOWN（已提供补丁）/ **0 未修复失败**，退出码 0；`v2.8.0` 全项 PASS。
 - README Markdown 结构校验：代码围栏、折叠块、表格、相对链接全部配对且无失效链接。
 
 ## [v2.7.0] - 2026-11-07
