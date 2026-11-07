@@ -9,7 +9,7 @@
 [![Search](https://img.shields.io/badge/Search-SQLite_FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](lib/index.py)
 [![Vault](https://img.shields.io/badge/Vault-Obsidian-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](lib/vault.py)
 [![Privacy](https://img.shields.io/badge/Privacy-Local_only-2E8B57?style=flat-square)](#-安全与隐私)
-[![Version](https://img.shields.io/badge/Version-v2.9.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v3.0.0-EA4AAA?style=flat-square)](docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/License-MIT-2E8B57?style=flat-square)](LICENSE)
 
 ---
@@ -43,7 +43,7 @@
 - **本地模型或外部 API 都行**：默认指向本机推理服务（Bonsai2，自动 `disable_thinking`），也可切任意 OpenAI 兼容接口；模型挂了自动降级为纯本地检索，不编造答案。
 - **Obsidian 独立新库**：自动在桌面生成 `资源管理/` 独立 Obsidian 库（带多级大纲 MOC 与 AI 侧边栏插件），**不碰你原有的任何笔记库**。
 
-实测数据：3 个 QQ 群、1641 条原始清单去重后 **1625 条 / 约 12.73 GB**，覆盖 6 个领域、23 个具体科目、6 类资源。
+实测数据：3 个 QQ 群、1641 条原始清单去重后 **1625 条 / 约 12.73 GB**，覆盖 8 个领域、29 个具体科目、8 类资源、55 个多归属主题标签。分类升级后**条目一条不少**（`catalog.verify_integrity()` 门禁）。
 
 ---
 
@@ -52,8 +52,11 @@
 | 能力 | 说明 |
 | --- | --- |
 | 📥 **QQ 群文件只读盘点** | 通过本机 NapCat（OneBot 11）`get_group_root_files` + `get_group_files_by_folder` **递归遍历全部目录**，只取元数据；接口掉线自动收紧为「离线快照」并锁定下载，恢复在线需用户显式点「刷新来源」 |
-| 🧠 **群文件三级自动分类** | `领域 → 科目/主题 → 资源类型` 三层归类，词库全部在 `config.json`（6 领域 / 23 科目 / 6 类型），按「文件夹名权重 > 文件名权重」打分，可自由增删；详见 [群文件自动分类](#-群文件自动分类) |
-| 💬 **微信群文件监听采集** | 基于 GitHub 成熟方案 **WeChatFerry** 的监听式适配器，只接收你**指定群**内的文件/附件消息，5 秒防抖并入目录；默认关闭、绝不读加密库；详见 [微信监听与收集](#-微信监听与收集) |
+| 🧠 **群文件三级自动分类 + 多归属标签** | `领域 → 科目/主题 → 资源类型` 三层归类，词库全部在 `config.json`（8 领域 / 29 科目 / 8 类型 + 14 组相关主题别名）；关键词按长度加权避免泛词误判，另生成**多归属主题标签**，「按主题标签」视图里同一文件会在多个节点出现，**绝不藏文件**；详见 [群文件自动分类](#-群文件自动分类) |
+| 🔎 **别名召回，不再漏项** | 搜索词自动按同义/相关主题展开：实测搜「高等代数」从旧版 **1 条 → 124 条**（线性代数、矩阵、行列式、多项式等全部召回）；`verify_integrity()` 保证条目数/id/标签不缺失 |
+| 💬 **微信群文件监听采集** | 基于 GitHub 成熟方案 **WeChatFerry** 的监听式适配器，只接收你**指定群**内的文件/附件消息，5 秒防抖并入目录；**界面顶部「微信」按钮直达登录/群清单/监听页面**，一键启用、安装、检测，不用手改配置；默认关闭、绝不读加密库；详见 [微信监听与收集](#-微信监听与收集) |
+| 🔑 **QQ 登录本页闭环** | 二维码在资源管理器自己的页面直出、过期自动换新，「刷新二维码」会自动拉起未运行的 NapCat；**不需要打开任何 NapCat 控制台**，登录成功自动恢复在线来源 |
+| 🛠️ **install 真的管 NapCat** | `install.bat` 内置 NapCat 安装自检：检测运行时 / 启动脚本 / WebUI / OneBot 配置，自动修复 `webui.json` 的 `host=::`（本机 127.0.0.1 拒绝连接的根因）并生成可回滚备份与 `state/napcat_setup.json` 报告；也可单独跑 `tools/setup_napcat.bat` |
 | 🔍 **SQLite FTS5 全文检索** | trigram 分词 + 可选 `jieba` 中文分词；命中判定与答案生成**解耦**——模型只负责概括，不负责判断「有没有」；支持按当前浏览范围限定检索，避免「问高数却答复变」 |
 | 🤖 **AI 防臆造问答** | 未命中直接如实回答、不调模型；「有哪些/多少/未下载」走目录确定性统计；已下载条目可概括正文，未下载条目强制标注「仅元数据」；来源索引可点击回跳 |
 | 📚 **Obsidian 同步** | 自动生成 `00-资源总览`、全量多级大纲、每个层级一页 MOC、单文件预览笔记；所有生成笔记带 `NOTE_MARK`，重建时只删带标记的，**不碰手工笔记** |
@@ -71,11 +74,14 @@
 
 | 层级 | 取值来源 | 打分规则 |
 | --- | --- | --- |
-| **领域** `domain` | 6 个领域词库（学习 / 考试与复习 / 科研与论文 / 证书与竞赛 / 实习与就业 / 生活与办事） | `2 × 文件夹命中数 + 1 × 文件名命中数`；均未命中时若已识别出科目或属于课件/习题/笔记，则兜底为「学习」 |
-| **科目** `subject` | 23 个科目词库（高等数学、复变函数与积分变换、高等代数、数据结构、C语言程序设计…） | `3 × 文件夹命中数 + 2 × 文件名命中数`，取最高分；无命中兜底「综合」 |
-| **类型** `kind` | 6 类资源（试卷与解析 / 习题作业 / 课件资源 / 上课笔记 / 实验代码 / 指南说明） | `2 × 文件夹命中数 + 1 × 文件名命中数`，取最高分；无命中兜底「其他资料」 |
+| **领域** `domain` | 8 个领域词库（学习 / 考试与复习 / 科研与论文 / 证书与竞赛 / 实习与就业 / 生活与办事 / 党团与校园 / 选课与培养） | `2 × 文件夹命中 + 1 × 文件名命中`，命中词按长度加权；均未命中时若已识别出科目或属于课件/习题/笔记，则兜底「学习」 |
+| **科目** `subject` | 29 个科目词库（高等数学、线性代数、复变函数与积分变换、高等代数、数据结构、C语言程序设计、Fortran与工程计算…） | `3 × 文件夹命中 + 2 × 文件名命中`，科目全名出现额外加权，取最高分；无命中兜底「综合」 |
+| **类型** `kind` | 8 类资源（试卷与解析 / 习题作业 / 课件资源 / 上课笔记 / 实验代码 / 指南说明 / 模板与表单 / 书单与推荐） | `2 × 文件夹命中 + 1 × 文件名命中`，取最高分；无命中兜底「其他资料」 |
+| **主题标签** `tags` | **多值**：所有命中的科目 / 领域 / 类型 + 14 组相关主题别名 | 一份文件可落在多个标签节点下；`dim=tag` 可逐级下钻，计数之和 > 文件总数即代表多归属生效 |
 
 **为什么文件夹权重更高？** 群里通常已按「考试与复习 / 课件 / 作业」分好目录，文件夹名比文件名更可信；文件名只用来在同目录内区分科目与具体类型。
+
+**为什么不制造空类目？** v3.0.0 之前「高等代数」词库含泛词「多项式」，把一份无关的《第七章勒让德多项式》误判成高等代数，导致该科目全库只剩 1 条、搜索看起来像严重漏项。现在长关键词权重更高、科目全名额外加权，并去掉容易误伤的泛词；相关主题改用 `aliases` 做**召回扩展**而不是硬归类。实测「高等代数」搜索由 1 条提升到 124 条，1625 条目录一条不少。
 
 <details>
 <summary><b>分类结果如何被使用</b>（点击展开）</summary>
@@ -87,7 +93,7 @@
 
 </details>
 
-> 词库可按自己的课程表调整：`config.json → classification` 的 `domains / subjects / kinds`，改完点「刷新来源」重新归类即可。`tools/version_audit.py` 会拿 6 个代表性文件名回归验证分类词库是否失效。
+> 词库可按自己的课程表调整：`config.json → classification` 的 `domains / subjects / kinds / aliases`。改完执行 `python tools/reclassify.py`（自动备份 + 四道完整性门禁）原地重算，或 `POST /api/reclassify`；`--dry-run` 可先预览。`tools/version_audit.py` 会拿代表性文件名回归验证分类词库是否失效。
 
 ---
 
@@ -100,24 +106,23 @@
 
 | 环节 | 行为 |
 | --- | --- |
-| **启用前提** | ① `config.json → sources.wechat.wcf.enabled = true`；② 自行安装并运行 WeChatFerry 客户端 + 已登录的微信 3.9.x；③ `pip install wcferry` |
+| **启用前提** | ① 界面顶部「微信」按钮 →「启用微信采集」+「安装 wcferry」（不用手改 `config.json`）；② 电脑版**微信 3.9.x 已扫码登录**并运行 WeChatFerry 客户端（RPC `:10086`）；③ 页面「检查微信登录状态」显示已登录 |
 | **群白名单** | 必须显式指定监听群（wxid 列表）。`GET /api/wechat/wcf/rooms` 发现群、`POST /api/wechat/wcf/rooms/save` 保存到 `state/wechat_rooms.json`；**清单为空时明确报错，绝不监听全部群** |
 | **采集流程** | `POST /api/wechat/wcf/capture/start` → 解析 appmsg XML 中的 `<type>` 过滤出文件/附件 → 5 秒防抖缓冲 → `catalog.upsert_manifest()` → `index.sync()` 增量索引 → `vault.build_outlines()` |
 | **停止** | `POST /api/wechat/wcf/capture/stop`；`GET /api/wechat/wcf/status` 随时查看 enabled / available / login / capturing |
 | **降级** | 未装 `wcferry` 或客户端未登录时，`status` 给出明确指引，微信源不可用但**其余功能完全不受影响** |
 
-**启用步骤**
+**启用步骤（界面版，推荐）**：点顶部「微信」打开 `http://127.0.0.1:8787/wechat` → ①「启用微信采集」→「安装 wcferry」 → ② 在电脑版微信 3.9.x 里扫码登录并启动 WeChatFerry 客户端，回页面点「检查微信登录状态」 → ③「拉取我的群清单」勾选群 →「保存监听群」→「开始监听」。页面实时显示监听状态与已采集条数。
+
+> 微信登录**必须在微信客户端里完成**，本程序只检测登录态、不代扫码；微信 4.x 暂不被 WeChatFerry 支持，请继续使用 QQ 群文件通道。
+
+等价的 API（自动化时使用）：
 
 ```bash
-# 1. 安装可选依赖（其余功能不需要它）
-pip install wcferry
-
-# 2. 启动 WeChatFerry 客户端 + 登录微信 3.9.x（默认 RPC 127.0.0.1:10086）
-
-# 3. 编辑 config.json：把 sources.wechat.wcf.enabled 设为 true
-
-# 4. 启动服务，在界面或 API 中指定监听群并开始捕获
-python server.py
+curl -s -X POST http://127.0.0.1:8787/api/wechat/wcf/enable \
+     -H "Content-Type: application/json" -d '{"enabled":true}'
+curl -s -X POST http://127.0.0.1:8787/api/wechat/wcf/install
+curl -s -X POST http://127.0.0.1:8787/api/wechat/wcf/login
 curl -s http://127.0.0.1:8787/api/wechat/wcf/rooms
 curl -s -X POST http://127.0.0.1:8787/api/wechat/wcf/rooms/save \
      -H "Content-Type: application/json" -d '{"rooms":["wxid_xxx"]}'
@@ -189,7 +194,7 @@ flowchart LR
    https://github.com/ericzou090124/ericzou-01/releases/latest/download/resource-manager-installer.bat
 2. 直接双击它（不需要先解压、不需要命令行）
 3. 自动解压到 %USERPROFILE%\resource-manager，启动服务并打开 http://127.0.0.1:8787
-4. 点界面顶部「首次配置」向导：装 NapCat → 勾选 QQ 群 → 完成
+4. 点界面顶部「首次配置」向导：一键检测并修复 NapCat 配置 → 勾选 QQ 群 → 完成
 ```
 
 同页还有 `resource-manager-full.zip`（**仓库全部内容**：源码 + 全部文档 + 安装器 + 教程），下载后**先解压整个 zip**，再双击里面的 `start.bat`；以及 `SHA256SUMS.txt` 可校验文件完整性。
@@ -294,7 +299,7 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | 区域 | 内容 |
 | --- | --- |
 | **顶栏** | 面包屑、统一搜索框（命中高亮 +「问 AI」）、AI 助手、设置、QQ 登录、首次配置、刷新来源、**系统诊断** |
-| **左栏** | 授权来源状态（QQ 在线 / 离线快照、微信状态与限制说明）、分类大纲树（按分类 / 按来源切换）、统计卡 |
+| **左栏** | 授权来源状态（QQ 在线 / 离线快照、微信实时状态与「微信登录 / 群文件采集」按钮）、分类大纲树（按分类 / **按主题标签（多归属）** / 按来源切换）、统计卡（含分类完整性校验） |
 | **中栏** | 当前节点、全选本页 / 下载已选 / 整类下载、子级下钻、类型筛选条、文件列表（预览 / 下载 / 状态标签） |
 | **右栏** | 单文件预览（元数据 / 摘要 / 正文片段 / 资产与笔记路径）、AI 助手（快速模式、范围显示、可点击来源索引、快捷提问） |
 
@@ -342,12 +347,15 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `/api/qqlogin/status` · `/refresh` · `/quick` · `/restore` | GET / POST | 二维码登录状态、刷新二维码、免扫码快登、扫码后恢复在线 |
-| `/api/napcat/status` · `/start` | GET / POST | NapCat 运行状态 / 拉起服务 |
+| `/api/qqlogin/status` · `/refresh` · `/quick` · `/restore` | GET / POST | 本页二维码状态 / 刷新（自动拉起 NapCat）/ 免扫码快登 / 扫码后恢复在线 |
+| `/api/napcat/status` · `/start` · `/setup` | GET / POST | NapCat 完整自检 / 拉起服务 / **安装自检并自动修复配置** |
 | `/api/qq/groups` | GET | 列出本机 QQ 已加入的群 |
-| `/api/wechat/wcf/status` | GET | 微信适配器状态（enabled / available / login / capturing） |
+| `/api/reclassify` | POST | 词库升级后原地重算分类（不增删条目，带完整性门禁） |
+| `/api/wechat/wcf/status` | GET | 微信适配器状态（enabled / available / login / capturing / captured / saved_rooms / login_hint） |
+| `/api/wechat/wcf/enable` · `/install` · `/login` | POST | 一键启用 / 安装 wcferry / 检测微信登录态 |
 | `/api/wechat/wcf/rooms` · `/rooms/save` | GET / POST | 发现群 / 保存监听群清单 |
 | `/api/wechat/wcf/capture/start` · `/stop` | POST | 开始 / 停止微信监听采集 |
+| `/wechat` | GET | 微信登录与群文件采集可视化页面 |
 | `/api/setup` · `/setup/config` · `/setup/done` | GET / POST | 首次配置向导状态、保存群配置、标记完成 |
 
 </details>
@@ -369,6 +377,8 @@ python tools/version_audit.py     # 全版本可用性审计，生成 docs/VERSI
 | `v2.0.0` ~ `v2.3.0` | 前端统一搜索框与高亮、索引维护/基准、下载并发与增量、AI 退化路径修复 |
 | `v2.4.0` ~ `v2.7.0` | 配置自检与诊断端点、下载重试退避、系统诊断面板、HTTP 集成自测 |
 | `v2.8.0` | 主页重写、全版本可用性审计、历史补丁标签、文档与 Release 治理 |
+| `v2.9.0` ~ `v2.9.1` | 小白下载入口与完整教程闭环、可下载 Release 资产、一键安装器 cmd 解析故障修复 |
+| `v3.0.0` | **登录/安装/分类/微信四条链路实测修复**：NapCat 控制台入口移除与二维码本页直出、install 真正安装配置 NapCat、分类不漏项（高等代数 1→124 条）、微信登录与群文件采集可视化入口 |
 
 ### 全版本可用性审计
 
@@ -410,7 +420,7 @@ python tools/version_audit.py --tags v2.7.0      # 指定版本
 <details>
 <summary><b>主界面显示「离线快照」，下载按钮用不了？</b></summary>
 
-NapCat / OneBot 没在运行或运行中途掉线。点顶栏「QQ 登录」或「刷新来源」；登录页与离线提示都有「启动 NapCat」按钮，点一下会拉起 NapCat 并等待 WebUI 就绪。也可手动打开 `http://127.0.0.1:6099/webui` 登录后回主界面刷新。**恢复在线必须用户显式操作**，避免拿失效 `file_id` 下载。
+NapCat / OneBot 没在运行或运行中途掉线。点顶栏「QQ 登录」打开登录页：如果 NapCat 没跑，页面会**自动拉起**并在本页显示二维码（也可随时点「刷新二维码」），**不需要打开任何 NapCat 控制台**。扫码确认后页面会自动等待群文件接口就绪、刷新来源并跳回主界面。首次使用若提示「未检测到 NapCat」，双击 `install.bat` 或 `tools/setup_napcat.bat` 完成安装自检与配置修复。**恢复在线必须用户显式操作**，避免拿失效 `file_id` 下载。
 
 </details>
 

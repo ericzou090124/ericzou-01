@@ -1,7 +1,7 @@
 # 存档说明与版本记录
 
 > 仓库：`https://github.com/ericzou090124/ericzou-01.git` · 分支 `main`
-> 标签：`v1.0.0` ~ `v2.9.1`，另有 4 个历史补丁标签 `v1.3.0-p1` ~ `v1.6.0-p1`
+> 标签：`v1.0.0` ~ `v3.0.0`，另有 4 个历史补丁标签 `v1.3.0-p1` ~ `v1.6.0-p1`
 > 最近更新：2026-11-07 · 状态：代码、文档、全部标签与 GitHub Releases 已同步
 
 ---
@@ -14,7 +14,8 @@
 - **界面**：`http://127.0.0.1:8787`，双击 `start.bat` 或安装器启动
 - **QQ 接入**：本机 NapCat OneBot 11，三群实时遍历 1641 条，去重后 **1625 条 / 12.73 GB**
 - **微信接入**：v1.5.0 起集成 GitHub 成熟方案 **WeChatFerry** 的监听式采集（默认关闭、指定群白名单、绝不读加密库）；v1.9.0 加固为「清单为空拒绝启动」
-- **质量保障**：16 项回归自测 + 全版本可用性审计（`docs/VERSION_AUDIT.md`，28 个标签逐项检测，0 未修复失败）+ **`tools/verify_release.py` 发行前端到端验证**（真实 cmd 执行安装器、起真实 HTTP 服务打 API/静态资源、校验 SHA256 与数据零污染）
+- **质量保障**：18 项回归自测 + `tools/test_v3.py` 真实 HTTP 服务 37 项端到端自测 + 全版本可用性审计（`docs/VERSION_AUDIT.md`）+ **`tools/verify_release.py` 发行前端到端验证**（真实 cmd 执行安装器、起真实 HTTP 服务打 API/静态资源、校验 SHA256 与数据零污染）
+- **v3.0.0 实测修复**：QQ 二维码改为本页直出并可直接刷新（删掉跑不通的 NapCat 控制台入口、修复 `webui.json` 的 `host=::`）、`install.bat` 真正完成 NapCat 安装自检与配置修复、分类不再漏项（「高等代数」1→124 条，1625 条不丢）、补齐微信登录与群文件采集可视化入口。详见 [CHANGELOG.md](CHANGELOG.md) 与 [FEATURES.md](FEATURES.md) 的 v3.0.0 章节。
 - **v2.9.1 紧急修复**：v2.9.0 的一键安装器因 cmd 解析带中文的长 PowerShell 命令而解压失败（报 `'-ExecutionPolicy' is not recognized`），已改用 `-EncodedCommand` 纯 ASCII 命令行，并补上「标记占位符未替换」的隐藏缺陷。**已下载过 v2.9.0 安装器的用户请重新从 latest 直链下载一次**。
 - **📥 从哪里下载**：打开 [最新版 Release](https://github.com/ericzou090124/ericzou-01/releases/latest) 底部 **Assets** 区 → `resource-manager-installer.bat`（**双击即用**，小白首选）或 `resource-manager-full.zip`（**仓库全部内容**：源码 + 全部文档 + 安装器 + 教程），另有 `SHA256SUMS.txt` 可校验。两个直链文件名固定，永远指向最新版。**全部 Releases 正文均附同一套下载入口与安装闭环**；零基础图文教程见 [INSTALL.md](INSTALL.md)。
 

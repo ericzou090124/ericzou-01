@@ -526,3 +526,43 @@ Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点�
 Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点；或为 README 补实际界面截图。
 发行链路现在多了一道硬门禁：`build_release_assets.py` → `verify_release.py --from-github`
 → `sync_github_releases.py --apply --assets-dir dist`。
+
+---
+
+## 15:55（2026-11-07）— v3.0.0：用户截图驱动的四条链路修复
+
+用户发来 3 张截图，集中反馈 4 件事：①「打开 NapCat 控制台」进不去网页（`127.0.0.1:6099/webui` → `ERR_CONNECTION_REFUSED`），且二维码必须点「启动 NapCat」才出现；② 二维码要能直接刷新，不要去 NapCat 里刷新；③ install 要确定帮用户把 NapCat 装好；④ 分类「可以多一些但不能缺项漏项」，搜「高等代数」只有 1 项很奇怪；⑤ 微信登录入口看不到。要求全部修好、自测、同步 GitHub 并更新版本。
+
+### 复现与根因（先拿数据，不凭印象）
+
+- `netstat` 实测 `6099` / `3000` 均**未监听**，只有 `8787` 在跑 → NapCat 根本没启动，控制台 502/拒绝连接是必然；`cache/qrcode.png` 是 20 分钟前的旧图。
+- 读 `webui.json` 发现 `"host": "::"`。NapCat 绑定 IPv6 通配时，浏览器用 `127.0.0.1` 访问在本机 Node 组合下会被拒 —— 这是「控制台登不进网页」的配置层根因。
+- `find_runtime()` 实测返回 `...\shell_node\napcat.bat`（内容是 `node.exe index.js`），说明启动脚本找得到；但 `install_helper.py` 只装 Python 可选依赖 + 起服务，**完全没有碰 NapCat**，「install 帮用户装好 NapCat」是空的。
+- 分类：`state/catalog.json` 里 `subject == 高等代数` 恰好 1 条 —— 《第七章勒让德多项式.doc》，原因是词库里放了泛词「多项式」。全库文件名/路径含「高等代数」「高代」的是 **0 条**。再读 `catalog.upsert_manifest` 发现更要命的一行：`cat["items"] = [v for k,v in index.items() if k in seen or v.get("source") != "QQ群"]` —— 微信采集只传几条微信 rows 时，`seen` 里没有 QQ 群 id，**1625 条 QQ 群文件会被整批删掉**。这是「缺项漏项」的真实代码级原因，比分类单选严重得多。
+- 微信：`wechat_wcf.py` 有完整端点，`server.py` 也挂了路由，但 `web/` 下没有任何页面或按钮，左栏只有「未接入」+ 一整块劝退说明。用户「没看到入口」属实。
+
+### 决策与实现
+
+用户给了条件分支：「跑不通就完全用 NapCat + 删掉跑不通的入口；能跑通就修 bug 并让二维码可直接刷新」。实测修复 `webui.json` 后 WebUI 能跑通（HTTP 200），但**仍然选择删掉产品内的控制台外链**：这个入口对小白没有价值，二维码完全可以在我们自己的页面闭环，少一个跳出去的失败点。于是：
+
+1. 新增 `lib/napcat_setup.py`：只读体检 + 自动修配置 + `.rmbak` 备份 + `state/napcat_setup.json` 报告。`install_helper.py` 加 `[1/3]` 步骤，新增 `tools/setup_napcat.py/.bat`。
+2. 重写 `lib/qqlogin.py`：WebUI API → 本机渲染 → 缓存 PNG 三级二维码；过期图不展示；刷新自动拉起并等「比调用前更新」的图；登录态以 OneBot 为准。`napcat_launch.py` 探活改为 6099/3000 任一就绪。
+3. 重写 `lib/classify.py`：长度加权 + 科目全名加成 + `classify_full()` 多标签 + `aliases` 召回；`config.json` 词库扩到 8 领域 / 29 科目 / 8 类型 / 14 组别名。
+4. `lib/catalog.py`：默认纯增量并入、按来源显式 prune；新增 `tags` 维度、`verify_integrity()`、`reclassify()`；`server.refresh()` 传 `prune_source="QQ群"`，微信 flush 不传。`tools/reclassify.py` 带备份和四道门禁，先 `--dry-run` 确认再写盘。
+5. 新增 `web/wechat.html` + 三个端点 + 主界面「微信」按钮；`lib/wechat.py` 的劝退文案改成中性能力说明。
+6. 新增 `tools/test_v3.py`（真实 HTTP 服务 37 项），扩展 `smoke_test.py` 的 `[16]` `[17]`。
+
+### 自测中修掉的两个自己引入的问题
+
+- 第一次跑 `test_v3.py` 得 32/37。三个真失败同源：`DIMS["tag"] = ["tag"]` 写成了单数，实际字段是 `tags`，标签树塌成 1 个「未分类」桶。改为 `["tags"]` 后 55 个标签节点、计数和 5030 > 1625，多归属生效。另两个失败是测试把「不需要打开 NapCat 控制台」这句**说明文案**误判成入口，改成只检查可点击链接/字段。
+- 真实刷新时 `started` 被误标成 `true`。追查发现 `napcat_setup._probe_ports()` 的 0.6s 超时在 NapCat 刚启动时抖动，导致 `running=False` 又走了一次启动分支。改为 1.5s，并在 `qqlogin` 里直接用 `_webui_reachable()` 覆盖端口快照、`started = bool(r.get("started"))`。同进程复验：`启动 → status(qr 11KB) → refresh(started=false, requested=true, qr_ready=true)`。另外确认跨 Bash 调用的 `started=true` 是沙箱回收子进程导致，不是产品缺陷。
+
+### 实测结果
+
+`napcat_launch.start()` 6.3s 返回 `ok/webui_online/qr_ready`；`http://127.0.0.1:6099/webui` HTTP 200；二维码在本页渲染 11 KB；「高等代数」1 → 124 条；1625 条不变、完整性 OK；`smoke_test.py` ALL PASS；`test_v3.py` 37/37 PASS。之后 kill 旧 8787 进程、用 `launcher.launch_server()` 以独立窗口重启服务，`/api/health|state|qqlogin/status|napcat/setup|wechat/wcf/status` 与 `/wechat` 全部 200，首页含新「微信」按钮。
+
+### 经验
+
+- 用户说的「缺项漏项」不一定在分类算法里，先去查**写目录的那行代码**；这次真正的丢数据 bug 在 `upsert_manifest` 的反向裁剪。
+- 「入口打不开」要区分是服务没起、绑定地址不对、还是产品根本不该暴露这个入口；三者都可能同时成立，实测端口和配置比猜更省时间。
+- 分类加类目容易，关键是给每个文件**多归属**并提供完整性门禁，否则每加一个类目就多一处「藏文件」的地方。

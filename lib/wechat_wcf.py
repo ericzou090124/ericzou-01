@@ -84,6 +84,11 @@ def status(cfg: dict) -> dict:
         "available": available(),
         "connected": False, "login": False,
         "rooms": [], "reason": "", "mode": "wechatferry",
+        "capturing": is_capturing(), "captured": _captured_count(),
+        "saved_rooms": load_rooms(),
+        "login_hint": "微信登录必须在电脑版微信里完成：启动微信 3.9.x → 手机扫码确认 → "
+                      "再启动 WeChatFerry 客户端（本地 RPC 10086）。本程序不代扫码、不读取聊天数据库。",
+        "port": int(wcf.get("port", 10086)),
     }
     if not wcf.get("enabled"):
         out["reason"] = "未开启：在 config.json 的 sources.wechat.wcf.enabled 设为 true，并安装 wcferry、运行 WeChatFerry 客户端 + 微信 3.9.x 登录后可用"
@@ -283,3 +288,53 @@ def _captured_count() -> int:
 def _note_captured() -> None:
     with _counter_lock:
         _counter["n"] += 1
+
+
+# ---- 微信页面的一键操作：启用 / 安装 / 检测登录 ----
+def enable(enabled: bool = True) -> dict:
+    """一键把 config.json 里的微信采集开关打开/关闭（原子写盘）。"""
+    from . import config
+    r = config.save_wechat_config({"enabled": bool(enabled), "wcf": {"enabled": bool(enabled)}})
+    return {"ok": True, **r,
+            "msg": "微信采集已启用，下一步确认微信客户端已登录并运行 WeChatFerry。" if enabled
+                   else "微信采集已关闭（已采集的资料仍保留在资源库里）。"}
+
+
+def install_wcferry(timeout: int = 180) -> dict:
+    """按需安装 wcferry（Python 客户端）。WeChatFerry 本体/微信客户端仍需用户自行安装登录。"""
+    if available():
+        return {"ok": True, "already": True, "available": True,
+                "msg": "wcferry 已安装，无需重复安装。"}
+    import subprocess
+    import sys
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "wcferry"],
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "available": False,
+                "error": "安装超时：请在网络通畅时手动执行 pip install wcferry"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "available": False, "error": f"安装失败：{e}"}
+    if r.returncode != 0:
+        return {"ok": False, "available": False,
+                "error": "pip install wcferry 失败：" + (r.stderr or r.stdout or "")[-300:]}
+    return {"ok": True, "available": True, "already": False,
+            "msg": "wcferry 安装成功。请确认微信 3.9.x 已登录并运行 WeChatFerry 客户端后点「重新检测」。"}
+
+
+def login_check(cfg: dict) -> dict:
+    """重新检测微信登录态（微信扫码必须在微信客户端里完成，这里只做状态确认）。"""
+    st = status(cfg)
+    if st.get("login"):
+        return {"ok": True, "login": True, "connected": True,
+                "rooms": st.get("rooms", []),
+                "msg": "微信已登录，可以拉取群清单并开始监听群文件。"}
+    if not st.get("enabled"):
+        return {"ok": False, "login": False, "error": "微信采集尚未启用，请先点「启用微信采集」。",
+                "hint": st.get("login_hint", "")}
+    if not st.get("available"):
+        return {"ok": False, "login": False, "error": "未安装 wcferry，请先点「安装 wcferry」。",
+                "hint": st.get("login_hint", "")}
+    return {"ok": False, "login": False,
+            "error": st.get("reason") or "微信未登录或 WeChatFerry RPC 未连接",
+            "hint": st.get("login_hint", "")}

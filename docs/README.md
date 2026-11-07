@@ -10,7 +10,7 @@
 | 验收、看这次到底交付了什么 | [RELEASE.md](RELEASE.md) — 存档说明 + 逐项验收清单 + 全版本记录 |
 | 快速上手、查接口、看权限表、FAQ | 根目录 [README.md](../README.md) |
 | 查版本变化摘要 | [CHANGELOG.md](CHANGELOG.md) |
-| 追溯开发过程、每次决策与故障处理（开发者日志） | [DEVLOG.md](DEVLOG.md) — 按时间顺序，v1.0.0 ~ v2.9.0 共 16 轮迭代 |
+| 追溯开发过程、每次决策与故障处理（开发者日志） | [DEVLOG.md](DEVLOG.md) — 按时间顺序，v1.0.0 ~ v3.0.0 共 17 轮迭代 |
 | 了解整体流程 / 模块 / 数据流 / 界面交互 / 权限降级（设计阶段产物） | [DESIGN.md](DESIGN.md) |
 | 通读一遍，明白「为什么这样设计」 | [GUIDE.md](GUIDE.md) — 说明性文字，不重复表格 |
 | 看技术实现路线与代码结构 | [ARCHITECTURE.md](ARCHITECTURE.md) |
@@ -39,7 +39,10 @@
 
 | 工具 | 用途 |
 | --- | --- |
-| `tools/smoke_test.py` | 16 项单元 + HTTP 集成回归，退出码 0 即通过 |
+| `tools/smoke_test.py` | 18 项单元 + HTTP 集成回归（含 v3.0.0 分类完整性 / NapCat 自检 / 入口断言），退出码 0 即通过 |
+| `tools/test_v3.py` | v3.0.0 真实 HTTP 服务端到端自测 37 项（登录 / 安装自检 / 分类召回 / 微信 / 老端点回归） |
+| `tools/setup_napcat.py` · `tools/setup_napcat.bat` | NapCat 网关安装自检、自动修配置、拉起并等二维码（`--check` 只读体检） |
+| `tools/reclassify.py` | 词库升级后原地重算分类，带备份与四道完整性门禁（`--dry-run` 可预览） |
 | `tools/version_audit.py` | 全 tag 可用性审计 → `docs/VERSION_AUDIT.md` |
 | `tools/fix_legacy_tag.py` | 为历史缺陷版本生成 `-p1` 补丁标签（不改原 tag） |
 | `tools/bench.py` | 索引 rebuild / sync / optimize 微基准 |

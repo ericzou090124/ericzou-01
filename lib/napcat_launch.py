@@ -1,8 +1,8 @@
 """定位并拉起本机 NapCat（WebUI 与 OneBot 同一进程）。
 
-供登录页「启动 NapCat」按钮 / 主界面离线提示调用。
-- 只在用户显式触发时启动；不读取、不输出任何令牌。
-- 复用 NapCat 自身的 napcat.bat（OmniQQ-MCP 部署的运行时）。
+v3.0.0：路径定位统一交给 napcat_setup（安装自检用的也是它，避免两份清单漂移）；
+探活同时看 6099 / 3000 两个端口，任一就绪即视为网关已起；支持等二维码落盘。
+启动只在「用户打开登录页 / 点刷新二维码 / 显式点启动」时触发。
 """
 from __future__ import annotations
 
@@ -12,52 +12,49 @@ import subprocess
 import time
 from pathlib import Path
 
-_LOCAL = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
-_CANDIDATES = [
-    _LOCAL / "OmniQQ-MCP" / "napcat_runtime" / "shell_node" / "napcat.bat",
-    _LOCAL / "napcat" / "napcat.bat",
-    Path.home() / "napcat" / "napcat.bat",
-    Path("C:/NapCatQQ/napcat.bat"),
-    Path("D:/NapCatQQ/napcat.bat"),
-]
-_WEBUI_PORT = 6099
+from . import napcat_setup
+
 _DETACHED = 0x00000008  # DETACHED_PROCESS：脱离父控制台，独立窗口运行
 
 
 def find_runtime() -> str | None:
-    for p in _CANDIDATES:
-        try:
-            if p.is_file():
-                return str(p)
-        except Exception:
-            pass
-    # 兜底：在 LOCALAPPDATA 下递归找一个 napcat.bat
-    try:
-        for root, _dirs, files in os.walk(_LOCAL):
-            if "napcat.bat" in files:
-                return str(Path(root) / "napcat.bat")
-    except Exception:
-        pass
-    return None
+    p = napcat_setup.launcher_path()
+    return str(p) if p else None
 
 
-def is_running(port: int = _WEBUI_PORT) -> bool:
+def _port_open(port: int) -> bool:
     try:
-        s = socket.create_connection(("127.0.0.1", port), timeout=1.5)
-        s.close()
-        return True
-    except Exception:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+            return True
+    except OSError:
         return False
 
 
-def start(timeout: int = 40) -> dict:
-    """拉起 NapCat。已运行则直接返回；否则启动并最多等待 timeout 秒让 WebUI 端口就绪。"""
+def is_running(port: int | None = None) -> bool:
+    """任一网关端口就绪即算运行；传 port 时只查指定端口。"""
+    if port is not None:
+        return _port_open(port)
+    return _port_open(6099) or _port_open(3000)
+
+
+def qrcode_path() -> str:
+    p = napcat_setup.qrcode_cache()
+    return str(p) if p else ""
+
+
+def start(timeout: int = 40, wait_qr: bool = False) -> dict:
+    """拉起 NapCat。已运行则直接返回；否则启动并等待网关端口就绪。
+
+    wait_qr=True 时额外等 NapCat 把二维码写到 cache/qrcode.png（最多 15 秒）。
+    """
     if is_running():
-        return {"ok": True, "already": True, "msg": "NapCat 已在运行，直接刷新即可。"}
+        return {"ok": True, "already": True,
+                "msg": "NapCat 已在运行，二维码会直接显示在本页。",
+                "webui_online": _port_open(6099), "onebot_online": _port_open(3000)}
     bat = find_runtime()
     if not bat:
-        return {"ok": False, "error": "找不到 NapCat 启动脚本（napcat.bat）。请确认 NapCat 已安装；"
-                                       "或手动打开控制台 http://127.0.0.1:6099/webui 登录。"}
+        return {"ok": False, "error": "找不到 NapCat 启动脚本。请先双击 install.bat / tools/setup_napcat.bat 完成安装与配置。",
+                "need_install": True}
     try:
         subprocess.Popen(
             ["cmd", "/c", bat], cwd=os.path.dirname(bat),
@@ -66,16 +63,28 @@ def start(timeout: int = 40) -> dict:
         )
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"启动失败：{e}"}
+
     deadline = time.time() + timeout
     while time.time() < deadline:
         if is_running():
-            return {"ok": True, "started": True,
-                    "msg": "已拉起 NapCat，正在初始化 WebUI，请稍候刷新页面即可看到二维码。"}
-        time.sleep(1.5)
-    return {"ok": False, "error": f"已尝试启动，但 {timeout} 秒内 6099 端口仍未就绪。"
-                                   "NapCat 可能正在登录 QQ 或启动较慢，请稍后点「刷新二维码」重试；"
-                                   "也可手动打开控制台 http://127.0.0.1:6099/webui。"}
+            result = {"ok": True, "started": True, "launcher": bat,
+                       "webui_online": _port_open(6099), "onebot_online": _port_open(3000),
+                       "msg": "NapCat 已拉起，二维码正在生成，本页会自动显示。"}
+            if wait_qr:
+                q = time.time() + 15
+                while time.time() < q:
+                    if qrcode_path() or _port_open(6099):
+                        result["qr_ready"] = True
+                        break
+                    time.sleep(0.8)
+                result.setdefault("qr_ready", False)
+            return result
+        time.sleep(1.2)
+    return {"ok": False, "launcher": bat,
+            "error": f"已尝试启动，但 {timeout} 秒内网关端口仍未就绪。QQ 可能正在登录或启动较慢，"
+                     "请稍后再点「刷新二维码」；也可以双击 tools/setup_napcat.bat 查看自检报告。"}
 
 
 def webui_url() -> str:
-    return "http://127.0.0.1:6099/webui"
+    """仅内部诊断使用；产品界面已不再提供这个控制台入口。"""
+    return f"http://127.0.0.1:{6099}/webui"

@@ -50,11 +50,14 @@ ASSETS = (INSTALLER, ZIP, SUMS)
 KEY_FILES = (
     "server.py", "config.json", "README.md", "LICENSE", "start.bat", "install.bat",
     "docs/INSTALL.md", "docs/FEATURES.md", "web/index.html", "web/app.js",
-    "lib/index.py", "lib/ai.py", "tools/smoke_test.py",
+    "web/login.html", "web/wechat.html", "web/setup.html",
+    "lib/index.py", "lib/ai.py", "lib/napcat_setup.py", "lib/classify.py",
+    "tools/smoke_test.py", "tools/test_v3.py", "tools/setup_napcat.bat",
 )
 API_PATHS = ("/api/health", "/api/diagnose", "/api/tree?dim=classify&node=%5B%5D",
-            "/api/files?dim=classify&node=%5B%5D&limit=5", "/api/state")
-STATIC_PATHS = ("/", "/app.js", "/style.css")
+             "/api/tree?dim=tag&node=%5B%5D", "/api/files?dim=classify&node=%5B%5D&limit=5",
+             "/api/state", "/api/qqlogin/status", "/api/napcat/setup", "/api/wechat/wcf/status")
+STATIC_PATHS = ("/", "/app.js", "/style.css", "/login", "/wechat", "/setup")
 
 # 子进程引导脚本：在「解压出来的程序」里起服务，state/vault/端口全部隔离
 BOOTSTRAP = r'''

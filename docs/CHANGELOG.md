@@ -3,6 +3,46 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v3.0.0] - 2026-11-07
+
+**登录、安装、分类、微信四条链路的实测修复版**。本轮全部来自用户截图反馈的复现与端到端验证，不是纸面改动。
+
+### 修复
+- **NapCat 控制台入口打不开 / 二维码拿不到**：实测 `127.0.0.1:6099/webui` 返回 `ERR_CONNECTION_REFUSED`。两层根因：
+  1. `webui.json` 绑定 `host: "::"`，本机 IPv4 访问不稳定 → 新增 `lib/napcat_setup.py` 自动固定为 `127.0.0.1`（改前生成 `.rmbak` 可回滚）；实测修复后 `6099/webui` 返回 **HTTP 200**。
+  2. 登录页把「打开 NapCat 控制台」当主入口、二维码**只**依赖 WebUI API，服务没跑就彻底空白 → **彻底删除该产品内的控制台外链**（`web/login.html` / `web/setup.html` / `start_napcat.bat` / 服务端提示文案），改为本页直出。
+- **二维码必须在 NapCat 里刷新**：`lib/qqlogin.py` 重写为多源链路（WebUI `CheckLoginStatus` → 本机渲染 → NapCat `cache/qrcode.png` 兜底），「刷新二维码」会自动拉起未运行的 NapCat 并等待**新**二维码落盘；二维码陈旧（>180s）不再展示过期图，改为自动申请新码；登录成功以 OneBot `/get_login_info` 为权威判据。同进程实测：`启动 → status(qr 11 KB) → refresh(started=false, requested=true, qr_ready=true)`。
+- **分类漏项（搜「高等代数」只有 1 条）**：两个真实缺陷。
+  1. `catalog.upsert_manifest` 用「本次 rows」反向裁剪整个目录，**微信/本地来源并入时会把 1625 条 QQ 群文件删光** → 改为默认纯增量并入，只有 `refresh()` 拿到 QQ 全量清单时才按同来源 `prune_source="QQ群"` 裁剪。
+  2. 旧分类「赢家通吃 + 泛词」：`高等代数` 词库含「多项式」，把「第七章勒让德多项式.doc」误判成高等代数，全库该科目仅此 1 条 → 关键词按长度加权 + 科目全名加成，移除泛词；新增**多归属标签**与**别名召回**。实测「高等代数」搜索 **1 → 124 条**，1625 条一条不少。
+- **微信入口缺失**：后端早有 WeChatFerry 全套端点，前端却只有「未接入」+ 一大段劝退文字，用户完全找不到入口 → 新增独立「微信登录与群文件采集」页面与一键操作按钮。
+
+### 新增
+- **`lib/napcat_setup.py`**：安装自检 / 自动配置 / 可回滚备份。检查运行时、启动脚本、`webui.json`、`onebot11_*.json`（HTTP 是否启用、端口 3000、token）、端口存活；`ensure(fix=True)` 自动修正并写 `state/napcat_setup.json` 报告；`inspect()` 纯只读供自测。
+- **`install.bat` 真的管 NapCat 了**：`install_helper.py` 新增 `[1/3] 检测并配置 NapCat`，打印每一项修复 / 待处理 / 提醒、自检报告路径，未运行时可一键拉起；缺运行时给出两种明确安装方式。新增 `tools/setup_napcat.py` + `tools/setup_napcat.bat`（`--check` 只读体检 / `--start` / `--qr` 拉起并等二维码）。
+- **多归属主题标签**：`classify_full()` 返回 `(domain, subject, kind, tags)`，一份文件可同时属于多个主题；新增「按主题标签」下钻维度（55 个标签节点，计数之和 5030 > 1625，证明多归属生效）；`catalog.verify_integrity()` 作为完整性门禁，`/api/state` 与界面显示「分类完整 · 无缺项漏项」。
+- **别名/相关主题召回**：`config.json` 新增 `classification.aliases`（14 组），搜索词自动扩展，避免同义内容搜不到。
+- **分类词库扩充**：科目 23 → 29（新增党团与思政实践、体育与军训、选课与培养、Fortran 与工程计算、LaTeX 与文档排版、自然科学概论、算法与编程实践），领域 7 → 8，资源类型 6 → 8；均基于真实文件名归纳，不制造空类目。
+- **`tools/reclassify.py`**：词库升级后原地重算分类，带一次性备份与四道门禁（条目数 / id 集合 / 下载状态 / 完整性），支持 `--dry-run`。
+- **`web/wechat.html`**：微信登录与群文件采集完整界面 —— 状态灯（采集开关 / wcferry / RPC / 微信登录 / 监听）、三步闭环（启用能力 → 微信登录检测 → 拉取群清单并勾选监听）、已监听群与已采集计数、能力限制说明。新增 `/api/wechat/wcf/enable|install|login` 与增强的 `status`（`capturing` / `captured` / `saved_rooms` / `login_hint`）。
+- **服务端新端点**：`GET|POST /api/napcat/setup`、`POST /api/reclassify`、`GET /wechat`；`/api/diagnose` 增加 NapCat 与微信检查项；`/api/napcat/status` 改为返回完整自检。
+- **`tools/test_v3.py`**：真实 HTTP 服务端到端自测 37 项（页面 / 登录 / 安装自检 / 分类召回 / 多归属 / 微信 / 老端点回归）。
+
+### 变更
+- `web/login.html` 重写：状态灯改为「NapCat 网关 / 二维码 / 群文件接口」，新增安装自检卡与「一键检测并修复配置」，打开页面时自动拉起未运行的 NapCat；所有文案不再引导用户去任何控制台。
+- `web/setup.html` 第 1 步改为「一键检测并修复配置」，删掉 NapCat 官网控制台链接式引导。
+- `web/index.html` / `web/app.js`：新增「微信」按钮、左栏微信动态状态；文件列表与预览展示主题标签；统计区显示完整性校验。
+- `requirements-optional.txt` 增加 `qrcode[pil]` 作为二维码渲染备用实现。
+- `docs/INSTALL.md` / `docs/FEATURES.md` / `README.md` / `docs/DEVLOG.md` / `docs/VERSION_AUDIT.md` 同步本轮修复与验证数据。
+
+### 自测
+- `tools/smoke_test.py`：**ALL PASS**（含新增 [16] 分类完整性/召回/多归属/不删条目、[17] NapCat 自检/登录页/微信入口）。
+- `tools/test_v3.py`：**37/37 PASS**（真实 HTTP 服务，1625 条真实目录零污染）。
+- 真实拉起 NapCat：`napcat_launch.start()` 6.3s 返回 `ok/webui_online/qr_ready`；`/webui` HTTP 200；二维码本页渲染 11 KB；刷新二维码 `requested=true, qr_ready=true, started=false`。
+- `tools/verify_release.py`：本地 `dist/` 与 GitHub 直链端到端 7 步全通过（详见本版 Release）。
+
+---
+
 ## [v2.9.1] - 2026-11-07
 
 紧急修复：**一键安装器双击报 `'-ExecutionPolicy' is not recognized ...`，解压失败**。v2.9.0 的 Release 资产有此缺陷，请用本版（或 `latest` 直链）重新下载。

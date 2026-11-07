@@ -35,11 +35,17 @@ async function loadState() {
   const loginBtn = $('#btn-login');
   loginBtn.className = on ? 'btn' : 'btn warn';
   loginBtn.title = on ? 'QQ 已在线，可打开登录页查看状态' : 'QQ 登录态失效，打开网页扫码登录';
+  const w = d.wechat || {}, wst = d.wcf || {};
+  const wxLabel = wst.capturing ? '监听中' : (wst.login ? '已登录' : (wst.enabled ? '已启用' : '未接入'));
+  const wxCls = (wst.capturing || wst.login) ? '' : 'off';
   $('#sources').innerHTML = `
     <div class="src"><span>QQ 群文件</span><span class="badge ${on ? '' : 'warn'}">${on ? '在线' : (d.source.mode === 'snapshot' ? '离线快照' : '未连接')}</span></div>
-    <div class="src"><span>微信</span><span class="badge off">未接入</span></div>
+    <div class="src"><span>微信</span><span class="badge ${wxCls}">${wxLabel}</span></div>
+    <button class="btn small" id="sb-wechat" style="width:100%;margin-bottom:6px">微信登录 / 群文件采集</button>
     ${offlineNote}
     <div class="muted" style="font-size:11px">${esc(Object.entries(d.source.groups || {}).map(([k,v]) => `${k} ${v.files}`).join(' · '))}</div>`;
+  const sw = $('#sb-wechat');
+  if (sw) sw.onclick = () => window.open('/wechat', '_blank');
   const bn = $('#sb-napcat');
   if (bn) bn.onclick = async () => {
     toast('正在拉起 NapCat…', 4000);
@@ -51,13 +57,15 @@ async function loadState() {
     toast(r.ok ? (r.msg || '已启动 NapCat，稍后点「刷新来源」') : ('启动失败：' + (r.error || '')), 7000);
     if (r.ok) setTimeout(() => $('#btn-refresh').click(), 9000);
   };
-  const w = d.wechat || {};
-  $('#wechat-limits').innerHTML = `<details><summary>微信接入限制（点击展开）</summary>
-    ${esc(w.reason || '')}<br>${Object.values(w.limits || {}).map(x => '· ' + esc(x)).join('<br>')}</details>`;
-  const c = d.counts;
+  $('#wechat-limits').innerHTML = `<details><summary>微信接入能力说明（点击展开）</summary>
+    <div style="padding-top:6px">微信通道基于 WeChatFerry 监听你勾选群里的文件消息：
+    需微信 PC 3.9.x 登录 + 本地 RPC 10086；历史群文件与加密聊天库不可读、不读取。
+    ${esc(w.reason || '')}<br>${Object.values(w.limits || {}).map(x => '· ' + esc(x)).join('<br>')}</div></details>`;
+  const c = d.counts, ig = d.integrity || {};
   $('#stats').innerHTML = `<div>授权可见 <b>${c.total}</b> 份</div>
     <div>已下载 <b>${c.downloaded}</b> · 仅元数据 <b>${c.metadata_only}</b></div>
-    <div>${c.domains} 个领域 / ${c.subjects} 个科目</div>
+    <div>${c.domains} 个领域 / ${c.subjects} 个科目 / ${c.tags || 0} 个主题标签</div>
+    <div class="${ig.ok === false ? 'bad' : 'muted'}">${ig.ok === false ? '⚠ 分类完整性校验异常' : '分类完整 · 无缺项漏项 ✓'}</div>
     <div class="muted">合计约 ${(c.size_bytes/1024/1024/1024).toFixed(2)} GB</div>
     <div class="muted">单批下载上限 ${d.download_cap} 个文件</div>`;
 }
@@ -130,7 +138,7 @@ function renderFiles() {
     <div class="file">
       <input type="checkbox" data-id="${esc(x.id)}" ${state.selected.has(x.id) ? 'checked' : ''} ${x.downloaded ? 'disabled' : ''}>
       <div class="name">${hl(x.name)}
-        <div class="meta">${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}</div>
+        <div class="meta">${esc(x.domain)} / ${esc(x.subject)} / ${esc(x.kind)} · ${esc(x.size)} · ${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据 · 未下载</span>'}${x.summary ? ' · ' + hl(x.summary.slice(0, 42)) : ''}${(x.tags || []).length ? ' · 标签：' + hl((x.tags || []).slice(0, 4).join(' / ')) : ''}</div>
       </div>
       <span class="link" data-id="${esc(x.id)}">预览</span>
     </div>`).join('');
@@ -150,6 +158,7 @@ async function showPreview(id) {
     <div class="muted" style="line-height:1.8">
       来源：${esc(x.source)} / ${esc(x.group)}<br>
       分类：${esc(x.domain)} › ${esc(x.subject)} › ${esc(x.kind)}<br>
+      主题标签：${(x.tags || []).map(esc).join(' / ') || '（无）'}<br>
       群内路径：${esc(x.path)}<br>
       体积：${esc(x.size)} · 上传：${esc(x.uploaded_at || '未知')}<br>
       状态：${x.downloaded ? '<span style="color:var(--ok)">已下载</span>' : '<span style="color:var(--warn)">仅元数据，未下载，无正文摘要</span>'}
@@ -256,6 +265,7 @@ function settingsModal() {
 }
 
 $('#btn-login').onclick = () => window.open('/login', '_blank');
+$('#btn-wechat').onclick = () => window.open('/wechat', '_blank');
 $('#btn-setup').onclick = () => { window.location.href = '/setup'; };
 $('#btn-refresh').onclick = async () => {
   $('#btn-refresh').disabled = true; $('#btn-refresh').textContent = '刷新中…';

@@ -59,6 +59,8 @@ def main() -> None:
         sys.exit(1)
 
     os.chdir(root)
+    if root not in sys.path:
+        sys.path.insert(0, root)
     py = sys.executable
 
     print("=" * 44)
@@ -66,9 +68,45 @@ def main() -> None:
     print("=" * 44)
     print("")
 
-    print("[1/2] 依赖检查：核心功能只用 Python 标准库，无需安装任何包。")
+    # ---- [1/3] NapCat 网关：真正做安装自检 + 自动修配置，而不只是打印一句提示 ----
+    print("[1/3] 检测并配置 NapCat（QQ 群文件的本地网关，必需）…")
+    nap = {}
+    try:
+        from lib import napcat_setup
+        nap = napcat_setup.ensure(fix=True, start=False)
+        if nap["installed"]:
+            print("      ✓ 已检测到 NapCat 运行时：" + (nap["runtime_dir"] or "-"))
+            print("      ✓ 启动脚本：" + (nap["launcher"] or "（NapCat 首次启动后生成）"))
+        else:
+            print("      ✗ 本机还没检测到 NapCat 运行时。")
+        for f in nap.get("fixed", []):
+            print("      ✓ 已自动修复：" + f)
+        for i in nap.get("issues", []):
+            print("      ✗ 待处理：" + i)
+        for w in nap.get("warnings", []):
+            print("      ! 提醒：" + w)
+        if nap.get("report"):
+            print("      自检报告：" + nap["report"])
+        if not nap.get("installed"):
+            print("")
+            print("      【需要你做一次】安装 NapCat：")
+            print("       方式 A：在 WorkBuddy 里启用 OmniQQ 插件（自带 NapCat 运行时，推荐）")
+            print("       方式 B：到 https://napneko.github.io/ 下载 Windows 一键包，解压后运行一次 napcat.bat")
+            print("       装好后再双击本 install.bat，程序会自动完成剩下的配置。")
+        elif not nap.get("running") and os.environ.get("RM_NO_NAPCAT_START") != "1":
+            a = safe_input("      是否现在启动 NapCat 并准备扫码登录？[Y/n]：", "y").strip().lower()
+            if a in ("", "y"):
+                from lib import napcat_launch
+                r = napcat_launch.start()
+                print("      " + (r.get("msg") or r.get("error") or "已提交启动"))
+    except Exception as e:  # 自检失败不能阻断主程序
+        print("      ! NapCat 自检未完成：" + type(e).__name__ + ": " + str(e))
+        print("        可稍后双击 tools/setup_napcat.bat 单独检测。")
     print("")
-    ans = safe_input("是否安装可选增强（PDF 正文抽取 / 本机渲染二维码）？建议装 [Y/n]：").strip().lower()
+
+    # ---- [2/3] 可选 Python 增强 ----
+    print("[2/3] 依赖检查：核心功能只用 Python 标准库，无需安装任何包。")
+    ans = safe_input("是否安装可选增强（PDF 正文抽取 / 本机渲染二维码）？建议装 [Y/n]：", "y").strip().lower()
     if ans in ("", "y"):
         req = os.path.join(root, "requirements-optional.txt")
         if os.path.exists(req):
@@ -82,7 +120,7 @@ def main() -> None:
         print("已跳过可选增强。程序可正常运行（PDF 只登记元数据，二维码用 NapCat 缓存图）。")
 
     print("")
-    print("[2/2] 启动本地服务并打开界面…")
+    print("[3/3] 启动本地服务并打开界面…")
     print("界面地址： " + BASE)
     print("（服务运行在独立窗口，关闭它即可停止；本服务仅监听本机 127.0.0.1）")
     print("")

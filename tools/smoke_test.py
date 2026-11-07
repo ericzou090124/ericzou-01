@@ -204,6 +204,46 @@ def main():
         fail(f"就业类文档领域误判为「{_cd3}」")
     print("[15] 群文件分类领域正确（学习 / 生活与办事 / 实习与就业 均归位）")
 
+    # ---- v3.0.0 新增回归：分类不漏项 / 多归属 / 别名召回 / 微信并入不删条目 ----
+    _v = catalog.verify_integrity(cat)
+    if not _v["ok"] or _v["total"] != total:
+        fail(f"[16] 分类完整性校验失败：{_v}")
+    _, _n_ga = catalog.query(cat, "classify", [], "高等代数", limit=1,
+                             with_total=True, cfg=config.CFG)
+    if _n_ga < 100:
+        fail(f"[16] 搜索「高等代数」召回仅 {_n_ga} 条（旧缺陷为 1 条）")
+    _tn = catalog.tree(cat, "tag", [])
+    if not any(x["name"] == "高等代数" for x in _tn):
+        fail("[16] 标签树缺少「高等代数」相关主题节点")
+    if sum(x["count"] for x in _tn) <= total:
+        fail("[16] 标签未实现多归属（计数之和应大于文件总数）")
+    _before_v3 = len(cat["items"])
+    catalog.upsert_manifest(cat, [{
+        "source": "微信(WeChatFerry)", "group": "自测群", "path": "s.pdf",
+        "name": "线性代数讲义.pdf", "folder": "(群文件消息)"}], config.CFG)
+    if len(cat["items"]) != _before_v3 + 1:
+        fail("[16] 微信来源并入把 QQ 群条目删掉了（漏项回归）")
+    cat["items"] = cat["items"][:_before_v3]  # 纯内存还原，不写盘
+    print(f"[16] 分类完整性 OK；「高等代数」召回 {_n_ga} 条；{len(_tn)} 个多归属标签；微信并入不删条目")
+
+    # ---- v3.0.0 新增回归：NapCat 自检 / QQ 登录页 / 微信入口 ----
+    from lib import napcat_setup as _ns, qqlogin as _ql
+    _s = _ns.status()
+    if "installed" not in _s or "issues" not in _s or "running" not in _s:
+        fail(f"[17] NapCat 自检结构异常：{_s}")
+    _ins = _ns.inspect()
+    if _ins["installed"] and _ins["webui_host"] not in ("127.0.0.1", ""):
+        fail(f"[17] WebUI host 仍是 {_ins['webui_host']}，6099 会拒绝 127.0.0.1 连接")
+    _qs = _ql.status()
+    if "webui_url" in _qs or not all(k in _qs for k in ("qr_image", "qr_key", "setup", "hint")):
+        fail("[17] qqlogin.status 结构异常或仍在对外暴露控制台地址")
+    _lg = (config.WEB / "login.html").read_text(encoding="utf-8")
+    if 'id="btn-webui"' in _lg or "6099/webui" in _lg:
+        fail("[17] 登录页仍保留跑不通的 NapCat 控制台入口")
+    if not (config.WEB / "wechat.html").is_file() or 'id="btn-wechat"' not in (config.WEB / "index.html").read_text(encoding="utf-8"):
+        fail("[17] 微信登录/群文件页面入口缺失")
+    print(f"[17] NapCat 自检(installed={_s['installed']} host={_ins['webui_host']}) / 登录页 / 微信入口 均 OK")
+
     # 下载重试：瞬时失败应重试后成功；永久失败(已失效)不重试
     import tempfile as _tf2
     _tmp2 = _P(_tf2.mkdtemp(prefix="rm_retry_test_"))

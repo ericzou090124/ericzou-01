@@ -16,7 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from lib import ai, catalog, config, config_validate, download, index, llm, napcat_launch, qq, qqlogin, vault, wechat, wechat_wcf  # noqa: E402
+from lib import (ai, catalog, config, config_validate, download, index, llm, napcat_launch,  # noqa: E402
+                 napcat_setup, qq, qqlogin, vault, wechat, wechat_wcf)
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -36,7 +37,7 @@ def setup_status() -> dict:
     demo = set(cfg.keys()) <= {"pxb6", "nzf4", "xfq12"}
     return {"ok": True, "done": config.setup_done(), "demo": demo,
             "groups": [{"key": k, **v} for k, v in cfg.items()],
-            "napcat_webui": qqlogin.webui_url()}
+            "napcat": napcat_setup.status()}
 
 
 def refresh(force_snapshot: bool = False) -> dict:
@@ -70,7 +71,8 @@ def refresh(force_snapshot: bool = False) -> dict:
     if not rows:
         return {"ok": False, "error": "QQ 接口不可用且没有离线快照，请先运行 tools/bootstrap.py"}
     CAT = catalog.load()
-    n = catalog.upsert_manifest(CAT, rows, cfg)
+    # 只有 QQ 全量清单才允许按来源裁剪；其它来源一律纯增量并入，绝不删条目
+    n = catalog.upsert_manifest(CAT, rows, cfg, prune_source="QQ群" if mode == "live" else None)
     catalog.save(CAT)
     # 增量同步：刷新来源后只重算变化的条目（首次运行 idx_meta 为空时等效全量重建）
     idx = index.sync(CAT)
@@ -114,6 +116,7 @@ def wechat_flush() -> None:
             return
         rows, _WECHAT_BUF, _WECHAT_TIMER = _WECHAT_BUF, [], None
     cat = ensure()
+    # 微信采集只是「部分来源」的几条消息：绝不裁剪目录，否则会删光 QQ 群文件
     n = catalog.upsert_manifest(cat, rows, config.CFG)
     catalog.save(cat)
     # 增量同步：仅重算变化的条目，避免每次捕获落库都全量重建索引（REVIEW 瓶颈#4）
@@ -178,6 +181,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file("login.html")
             if p == "/setup":
                 return self._file("setup.html")
+            if p == "/wechat":
+                return self._file("wechat.html")
             if p == "/api/setup":
                 return self._send(setup_status())
             if p == "/api/qq/groups":
@@ -187,8 +192,11 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/qqlogin/status":
                 return self._send(qqlogin.status())
             if p == "/api/napcat/status":
-                return self._send({"ok": True, "running": napcat_launch.is_running(),
-                                   "url": qqlogin.webui_url()})
+                return self._send({"ok": True, **napcat_setup.status(),
+                                   "running": napcat_launch.is_running()})
+            if p == "/api/napcat/setup":
+                # ok 表示请求成功；自检结论放在 status 里，避免两个 ok 语义混淆
+                return self._send({"ok": True, "status": napcat_setup.status()})
             if p == "/api/wechat/wcf/status":
                 return self._send({"ok": True, **wechat_wcf.status(config.CFG)})
             if p == "/api/wechat/wcf/rooms":
@@ -201,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
                 d["qq_online"] = bool(SOURCE_STATUS.get("qq_online", False))
                 d["index_docs"] = index.count()
                 d["vault"] = str(config.vault())
+                d["napcat"] = napcat_setup.status()
+                d["wechat"] = wechat_wcf.status(config.CFG)
                 return self._send({"ok": True, **d})
             if p == "/api/health":
                 # _sync_source() 已在请求开头实时探活；这里用状态缓存，
@@ -214,6 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                 wstatus["wcf"] = wechat_wcf.status(config.CFG)
                 wstatus["capturing"] = wechat_wcf.is_capturing()
                 return self._send({"ok": True, "source": SOURCE_STATUS, "counts": catalog.counts(cat),
+                                   "integrity": catalog.verify_integrity(cat),
                                    "wechat": wstatus, "wcf": wstatus["wcf"],
                                    "settings": config.public_settings(),
                                    "download_cap": config.CFG.get("max_download_per_batch", 30)})
@@ -224,7 +235,8 @@ class Handler(BaseHTTPRequestHandler):
                 node = json.loads(q.get("node", ["[]"])[0])
                 xs, total = catalog.query(ensure(), q.get("dim", ["classify"])[0], node,
                                          q.get("q", [""])[0], int(q.get("limit", ["200"])[0]),
-                                         with_total=True, kind=q.get("kind", [""])[0])
+                                         with_total=True, kind=q.get("kind", [""])[0],
+                                         cfg=config.CFG)
                 return self._send({"ok": True, "items": xs, "total": total,
                                    "shown": len(xs), "truncated": total > len(xs)})
             if p == "/api/file":
@@ -276,6 +288,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
+            if p == "/api/napcat/setup":
+                # 安装自检 + 自动修复本机 NapCat 配置（只改配置，不改 QQ 账号数据）
+                return self._send(napcat_setup.ensure(fix=True, start=False))
+            if p == "/api/wechat/wcf/enable":
+                return self._send(wechat_wcf.enable(bool(body.get("enabled", True))))
+            if p == "/api/wechat/wcf/install":
+                return self._send(wechat_wcf.install_wcferry())
+            if p == "/api/wechat/wcf/login":
+                return self._send(wechat_wcf.login_check(config.CFG))
             if p == "/api/wechat/wcf/rooms/save":
                 wechat_wcf.save_rooms(body.get("rooms") or [])
                 return self._send({"ok": True, "rooms": wechat_wcf.load_rooms()})
@@ -293,9 +314,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 避免轮询 20+ 秒让页面像卡死（这是 v1.2.3 自测发现的真实卡顿）。
                 if not qq.reachable() and not qq.online():
                     return self._send({"ok": False, "need_start": True,
-                                       "error": "NapCat 未运行：请先点页面上的「启动 NapCat」按钮，"
-                                                "或打开 http://127.0.0.1:6099/webui 登录 QQ 后再试。"
-                                                "（也可用 tools/start_napcat.bat 手动拉起）"})
+                                       "error": "NapCat 未运行：请点本页「刷新二维码」，"
+                                                "程序会自动拉起 NapCat 并生成二维码。"})
                 # 已扫码但 OneBot 3000 一般要几秒才起来：最多等约 8 秒，失败再提示手动刷新
                 for _ in range(6):
                     if qq.online():
@@ -350,6 +370,19 @@ class Handler(BaseHTTPRequestHandler):
                 cat = ensure()
                 return self._send({"ok": True, "docs": index.rebuild(cat),
                                    "outlines": vault.build_outlines(cat)})
+            if p == "/api/reclassify":
+                # 词库升级后原地重算分类：只改分类字段，绝不增删任何条目
+                cat = ensure()
+                before = len(catalog.items(cat))
+                n = catalog.reclassify(cat, config.CFG)
+                catalog.save(cat)
+                index.sync(cat)
+                v = catalog.verify_integrity(cat)
+                if len(catalog.items(cat)) != before or not v["ok"]:
+                    return self._send({"ok": False, "error": "重算后完整性校验失败，请检查目录",
+                                       "integrity": v}, 500)
+                return self._send({"ok": True, "items": n, "counts": catalog.counts(cat),
+                                   "integrity": v, "outlines": vault.build_outlines(cat)})
             if p == "/api/maintain":
                 return self._send(index.optimize())
             if p == "/api/init":

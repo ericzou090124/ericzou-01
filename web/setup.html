@@ -62,17 +62,22 @@
     <div class="note">
       本程序通过 <b>NapCat</b> 读取你授权可见的 QQ 群文件。它是个本地小程序，用你的手机 QQ 扫码登录，<b>不保存你的账号密码</b>。
     </div>
-    <ol class="note">
-      <li>到 NapCat 官网 <a class="ext" href="https://napneko.github.io/" target="_blank" rel="noopener">napneko.github.io</a> 下载 Windows 一键包
-        <code>NapCat.Shell.Windows.OneKey.zip</code>（已内置 QQ，无需另装）；</li>
-      <li>解压后双击 <code>napcat.bat</code> 启动，按控制台提示<b>用手机 QQ 扫码登录</b>；</li>
-      <li>登录成功后，NapCat 网页控制台默认在 <a class="ext" id="webui" href="#" target="_blank" rel="noopener">打开 NapCat 控制台</a>，保持它运行即可。</li>
-    </ol>
+    <div class="note">
+      ① 本机<b>已装过 NapCat</b>（例如 WorkBuddy 的 OmniQQ 插件自带）：直接点「一键检测并修复配置」，
+      程序会自动校正网关配置并生成自检报告；<br>
+      ② <b>没装过</b>：在 WorkBuddy 里启用 OmniQQ 插件（推荐），或到
+      <a class="ext" href="https://napneko.github.io/" target="_blank" rel="noopener">napneko.github.io</a>
+      下载 Windows 一键包、解压后运行一次 <code>napcat.bat</code>；<br>
+      ③ 装好后到「QQ 登录」页，<b>二维码在本页直接显示、过期自动换新</b>，手机 QQ 扫码即可，
+      <b>完全不需要打开 NapCat 控制台</b>。
+    </div>
     <div class="banner warn" id="nap-status">正在检测本机 NapCat…</div>
     <div class="row">
-      <button class="btn primary" id="nxt1">我已安装并扫码登录，下一步</button>
       <button class="btn" id="chknap">重新检测</button>
+      <button class="btn" id="fixnap">一键检测并修复配置</button>
+      <button class="btn primary" id="nxt1">下一步（填 QQ 群）</button>
     </div>
+    <div class="note" style="margin-top:8px">也可以双击 <code>tools\setup_napcat.bat</code> 做完整自检并自动拉起 NapCat。</div>
   </section>
 
   <!-- STEP 2 -->
@@ -121,19 +126,41 @@ function setStep(n){
 async function napStatus(){
   try{
     const d = await (await fetch('/api/qqlogin/status', {cache:'no-store'})).json();
-    $('#webui').href = d.webui_url || '#';
-    if (d.webui_online || d.onebot_online){
+    const issues = ((d.setup || {}).issues || []);
+    if (d.napcat_running){
       $('#nap-status').className = 'banner ok';
-      $('#nap-status').textContent = '检测到本机 NapCat 已运行' + (d.onebot_online ? '，群文件接口已就绪 ✅' : '，请用手机 QQ 扫码登录后继续');
+      $('#nap-status').textContent = 'NapCat 已运行'
+        + (d.onebot_online ? '，群文件接口已就绪 ✅' : '，请在「QQ 登录」页扫码完成登录')
+        + (d.qr_image ? '；二维码已就绪' : '') + (issues.length ? '\n待修：' + issues.join('；') : '');
+    } else if (d.napcat_installed){
+      $('#nap-status').className = 'banner warn';
+      $('#nap-status').textContent = 'NapCat 已安装但未运行：「QQ 登录」页会自动拉起并生成二维码。'
+        + (issues.length ? '\n待修：' + issues.join('；') : '');
     } else {
       $('#nap-status').className = 'banner warn';
-      $('#nap-status').textContent = '还没检测到 NapCat：请先完成第 1 步（启动 napcat.bat 并用手机 QQ 扫码登录）。';
+      $('#nap-status').textContent = '还没检测到 NapCat 运行时。请按上方两种方式安装，或双击 install.bat 让安装器帮你检测。';
     }
   }catch(e){
     $('#nap-status').className = 'banner warn';
     $('#nap-status').textContent = '本地服务未响应，请确认资源管理器已启动（双击 start.bat）。';
   }
 }
+
+$('#fixnap').onclick = async () => {
+  $('#nap-status').className = 'banner info';
+  $('#nap-status').textContent = '正在运行安装自检并自动修复配置…';
+  try{
+    const r = await api('/api/napcat/setup', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const fixed = r.fixed || [], issues = r.issues || [];
+    $('#nap-status').className = r.ok ? 'banner ok' : 'banner warn';
+    $('#nap-status').textContent = (fixed.length ? '已自动修复：' + fixed.join('；') : '')
+      + (issues.length ? '\n仍需处理：' + issues.join('；') : (fixed.length ? '' : '配置正常，无需改动 ✅'));
+  }catch(e){
+    $('#nap-status').className = 'banner warn';
+    $('#nap-status').textContent = '自检失败：' + e;
+  }
+  setTimeout(napStatus, 1200);
+};
 
 let selected = [];   // 自动列出的群
 async function listGroups(){

@@ -94,6 +94,19 @@ def save_qq_groups(groups: list[dict]) -> dict:
     return cleaned
 
 
+def save_wechat_config(patch: dict) -> dict:
+    """写回微信采集配置（原子写盘并同步内存 CFG），供微信页面一键启用调用。"""
+    w = CFG.setdefault("sources", {}).setdefault("wechat", {})
+    wcf = w.setdefault("wcf", {})
+    for k, v in (patch or {}).items():
+        if k == "wcf" and isinstance(v, dict):
+            wcf.update(v)
+        else:
+            w[k] = v
+    write_json(CONFIG_PATH, CFG)
+    return {"enabled": bool(w.get("enabled")), "wcf": dict(wcf)}
+
+
 def setup_done() -> bool:
     return state("setup_done.json").is_file()
 

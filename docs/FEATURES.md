@@ -236,3 +236,62 @@ start_capture(cfg, rooms, on_row)
 | 分类树 / 过滤 | `lib/catalog.py::tree` / `query` / `_matches` |
 | 回归自测 | `tools/smoke_test.py`（分类 `[15]`、微信清单 `[8]`） |
 | 全版本功能探测 | `tools/version_audit.py::FEATURE_PROBE` |
+
+---
+
+## v3.0.0 增补：四条链路的实测修复
+
+### 1. QQ 登录：从「依赖 NapCat 控制台」改为「本页闭环」
+
+`lib/qqlogin.py` 重写。二维码获取的三级冗余：
+
+1. NapCat WebUI `/api/QQLogin/CheckLoginStatus` 返回 `qrcodeurl` → 本机渲染（cv2 → `qrcode` 库）；
+2. WebUI 不可用时直接读 NapCat 自己写的 `napcat/cache/qrcode.png`；
+3. 缓存图超过 180 秒判定过期，绝不展示给用户扫，改为自动申请新码。
+
+`refresh_qrcode()` 在 NapCat 未运行时自动调 `napcat_launch.start()`，随后等**比调用前更新**的二维码落盘（用 mtime+size 做 key），避免用户点了刷新却看到旧图。登录成功以 OneBot `/get_login_info` 为权威判据，WebUI `isLogin` 只作辅助。
+
+**已删除的入口**：产品内的「打开 NapCat 控制台」链接与所有引导用户访问 `127.0.0.1:6099/webui` 的文案（`login.html` / `setup.html` / `start_napcat.bat` / 服务端提示）。用户不再需要离开资源管理器页面。
+
+### 2. install 真的装好 NapCat：`lib/napcat_setup.py`
+
+| 检查项 | 自动修复动作 |
+| --- | --- |
+| 运行时目录 / 启动脚本 | 定位 OmniQQ-MCP、标准 NapCat 安装路径，找不到时给出两种明确安装方式 |
+| `webui.json` 的 `host` | `::` → `127.0.0.1`（**这是 `ERR_CONNECTION_REFUSED` 的根因**），同时确保 `disableWebUI=false`、端口 6099、token 存在 |
+| `onebot11_*.json` | 确保 `httpServers[0]` 的 `enable=true` / `host=127.0.0.1` / `port=3000` / `token` 非空 |
+| 端口 / 进程 | `6099`、`3000` 实时探活 |
+
+所有写入前生成 `.rmbak` 一次性备份；`inspect()` 纯只读，`ensure(fix=False)` 可安全反复调用；报告落在 `state/napcat_setup.json`。`install_helper.py` 的 `[1/3]` 步骤会打印每一项修复 / 待处理 / 提醒，缺运行时给出引导；`tools/setup_napcat.bat` 支持 `--check` / `--start` / `--qr`。
+
+### 3. 分类：不漏项的两个真实缺陷
+
+| 缺陷 | 后果 | 修复 |
+| --- | --- | --- |
+| `upsert_manifest` 用本次 rows 反向裁剪整个目录 | 微信采集 / 本地目录并入几条时，把 **1625 条 QQ 群文件全部删光** | 默认纯增量并入；只有 `refresh()` 拿到 QQ 全量清单时才 `prune_source="QQ群"` |
+| 单选赢家通吃 + 泛词「多项式」 | 《第七章勒让德多项式》被误判成高等代数，全库该科目仅 1 条，搜「高等代数」看起来像严重漏项 | 关键词按长度加权（≥6 字权重 4）、科目全名 +12；移除泛词；多归属标签；别名召回 |
+
+`classify_full()` 返回 `(domain, subject, kind, tags)`，`tags` 包含所有命中的科目 / 领域 / 类型 + 命中 `aliases` 的相关主题。`DIMS["tag"] = ["tags"]` 让同一个文件在多个标签节点下出现；`catalog.verify_integrity()` 检查条目数、id 唯一、每条都有主分类和标签。
+
+实测（`tools/reclassify.py --dry-run` 后正式执行）：1625 条不变，领域 7→8、科目 23→29、类型 6→8、标签 55 个，搜索「高等代数」**1 → 124 条**，标签节点计数之和 5030 > 1625。原目录已备份到 `state/catalog.pre_reclassify.json`。
+
+### 4. 微信：入口从「无」到完整闭环
+
+后端端点早在 v1.5.0 就有，但前端只有「未接入」+ 一大段劝退文字。v3.0.0 新增 `web/wechat.html`（顶部「微信」按钮进入）与三个端点：
+
+- `POST /api/wechat/wcf/enable` — 一键写回 `sources.wechat.wcf.enabled`
+- `POST /api/wechat/wcf/install` — 按需 `pip install wcferry`
+- `POST /api/wechat/wcf/login` — 重新检测微信登录态并给出可操作指引
+
+`status()` 增补 `capturing / captured / saved_rooms / login_hint / port`。页面按「启用能力 → 微信登录检测 → 拉取群清单 / 勾选 / 开始监听」三步闭环，实时显示状态灯与采集计数。
+
+**边界保持诚实**：微信扫码必须在微信 PC 客户端完成，程序不代扫码；WeChatFerry 需要微信 3.9.x，4.x 暂不支持；只监听勾选群的文件消息，不读加密聊天库，不能补历史文件。
+
+### 验证数据（v3.0.0）
+
+| 项目 | 结果 |
+| --- | --- |
+| `tools/smoke_test.py` | ALL PASS（新增 `[16]` 分类完整性 / `[17]` NapCat 与入口回归） |
+| `tools/test_v3.py` | 真实 HTTP 服务 **37/37 PASS**，1625 条目录零污染 |
+| 真实拉起 NapCat | 6.3s 返回 `ok / webui_online / qr_ready`；`/webui` HTTP 200 |
+| 二维码 | 本页渲染 11 KB PNG；刷新 `started=false, requested=true, qr_ready=true`，key 变化 |

@@ -1,8 +1,10 @@
 # 可选增强（不装也能正常运行；装了体验更好）
 #   PyMuPDF              抽取 PDF 正文与摘要（不装则 PDF 只登记元数据，无正文摘要）
 #   opencv-python-headless 在网页里本机渲染登录二维码（不装则改用 NapCat 自带缓存图）
+#   qrcode[pil]           二维码渲染的轻量备用实现（cv2 不可用时接管）
 #   jieba                中文分词，提升 AI 检索词的精度（不装则回退到滑动 3-gram，功能不受影响）
 #                        设置环境变量 RM_NO_JIEBA=1 可强制关闭
 PyMuPDF
 opencv-python-headless
+qrcode[pil]
 jieba

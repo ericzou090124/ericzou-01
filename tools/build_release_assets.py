@@ -36,7 +36,10 @@ SUMS_NAME = "SHA256SUMS.txt"
 REQUIRED_IN_ZIP = (
     "server.py", "config.json", "README.md", "LICENSE", "start.bat", "install.bat",
     "docs/INSTALL.md", "docs/FEATURES.md", "docs/CHANGELOG.md", "docs/DEVLOG.md",
-    "tools/smoke_test.py", "tools/verify_release.py", "web/index.html", "web/app.js", "lib/index.py",
+    "tools/smoke_test.py", "tools/verify_release.py", "tools/test_v3.py",
+    "tools/setup_napcat.py", "tools/setup_napcat.bat", "tools/reclassify.py",
+    "web/index.html", "web/app.js", "web/login.html", "web/wechat.html", "web/setup.html",
+    "lib/index.py", "lib/napcat_setup.py", "lib/classify.py", "lib/catalog.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 
@@ -53,7 +56,8 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
 
   2) 双击 start.bat
        会自动启动本地服务，并打开浏览器到 http://127.0.0.1:8787
-       第一次使用：点页面顶部的「首次配置」，按向导装 NapCat、勾选 QQ 群即可。
+       第一次使用：install.bat 会自动检测并修好 NapCat 配置；点顶部「QQ 登录」
+       在页面上直接扫码（不用打开任何 NapCat 控制台），再在「首次配置」勾选 QQ 群即可。
 
 【只想一键装好？】
   本压缩包里的 resource-manager-installer.bat 也可以直接双击，
