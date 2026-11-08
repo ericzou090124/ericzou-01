@@ -274,18 +274,25 @@ def upload_release_assets(tok: str, latest_tag: str, dist: Path) -> int:
             "Content-Type": "application/octet-stream",
             "User-Agent": "resource-manager-release-sync",
         })
-        try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                out = json.loads(r.read().decode())
-            print(f"  [upload] {name:42s} {len(data):>9,d} B -> {r.status} "
-                  f"({WEB}/releases/download/{latest_tag}/{name})")
-            _ = out
-        except urllib.error.HTTPError as e:
+        # 大文件上传偶发 SSL / 代理瞬断（UNEXPECTED_EOF_WHILE_READING），重试 2 次；
+        # 同名资产已先删除，重试不会造成重复。
+        last = ""
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=180) as r:
+                    json.loads(r.read().decode())
+                print(f"  [upload] {name:42s} {len(data):>9,d} B -> {r.status} "
+                      f"({WEB}/releases/download/{latest_tag}/{name})")
+                last = ""
+                break
+            except urllib.error.HTTPError as e:
+                last = f"{e.code} {e.read().decode()[:300]}"
+                break  # 4xx/5xx 重试无意义
+            except Exception as e:
+                last = f"{type(e).__name__}: {e}"
+        if last:
             failed += 1
-            print(f"  [FAIL-upload] {name} -> {e.code} {e.read().decode()[:300]}")
-        except Exception as e:
-            failed += 1
-            print(f"  [FAIL-upload] {name} -> {type(e).__name__}: {e}")
+            print(f"  [FAIL-upload] {name} -> {last}")
     return failed
 
 
