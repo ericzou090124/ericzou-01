@@ -5,7 +5,7 @@
 | 我想… | 读这个 |
 | --- | --- |
 | **第一次用 / 不知道该下载哪个文件 / 从安装到用起来的完整闭环** | **[INSTALL.md](INSTALL.md)** ⭐ 零基础唯一入口（下载 → 双击 → 向导 → 下载资料 → 问答 → Obsidian） |
-| **了解微信群文件监听采集 / 群文件分类 / 内容驱动的泛化分类**（新增功能详解） | [FEATURES.md](FEATURES.md) — v3.1.0 章节含工作群资料对照与 GitHub 方案取舍 |
+| **了解分类与检索的实现细节 / 历史方案取舍**（含已移除的微信链路，仅供回溯） | [FEATURES.md](FEATURES.md) · [ARCHITECTURE.md](ARCHITECTURE.md)；当前能力表以根目录 `README.md` 为准 |
 | **查看全部历史版本的可用性检测结果** | [VERSION_AUDIT.md](VERSION_AUDIT.md)（由 `tools/version_audit.py` 生成） |
 | 验收、看这次到底交付了什么 | [RELEASE.md](RELEASE.md) — 存档说明 + 逐项验收清单 + 全版本记录 |
 | 快速上手、查接口、看权限表、FAQ | 根目录 [README.md](../README.md) |
@@ -21,7 +21,7 @@
 
 ## 建议阅读顺序
 
-- **第一次来 / 想快速判断项目是否适合自己**：根目录 `README.md` → `FEATURES.md`（若关心微信或分类）→「快速开始」。
+- **第一次来 / 想快速判断项目是否适合自己**：根目录 `README.md` 的能力表 → `INSTALL.md` 照做 → 需要时再看 `FEATURES.md`（注意其中微信章节为 v3.1.0 历史资料）。
 - **验收者**：`RELEASE.md` → 根目录 `README.md` → `VERSION_AUDIT.md` → `VERIFICATION.md`。
 - **接手维护的开发者**：`GUIDE.md` → `ARCHITECTURE.md` → `DEVLOG.md` → `CHANGELOG.md` → `server.py` → `lib/`。
 - **只想用起来（零基础）**：**`INSTALL.md`** 从头照做即可；不用读 `README.md` 的技术章节。

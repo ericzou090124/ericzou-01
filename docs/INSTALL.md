@@ -47,9 +47,9 @@
    - 验证（可选）：按 `Win + R` 输入 `cmd` 回车，敲 `python --version`，能显示版本号就成功。
 2. **QQ 群文件功能**：需要本机跑一个叫 [NapCat](https://napneko.github.io/) 的本地登录工具（用手机 QQ 扫码，不保存账号密码）。**`install.bat` 会自动检测并修好它的配置**（v3.0.0 起）；没装的话安装器会给你两种明确安装方式。扫码在资源管理器的「QQ 登录」页完成，**不用打开 NapCat 控制台**。
 3. **以下都是可选的，不装程序照样能用**：
-   - Obsidian（用来阅读生成的知识库）
+   - Obsidian（用来阅读生成的知识库；装了才能体验「导入后自动打开」）
    - 本地大模型 / OpenAI 兼容接口（AI 问答；不配就自动用「原文摘录」模式）
-   - WeChatFerry（微信监听采集；默认关闭，见 [FEATURES.md](FEATURES.md)）
+   - 可选 Python 包（PyMuPDF 抽 PDF 正文、jieba 分词等）；**v3.2.0 起已移除微信登录与采集链路，不再需要 WeChatFerry**
 
 ---
 
@@ -204,16 +204,16 @@ NapCat 没运行或登录过期。点顶栏「QQ 登录」：页面会自动拉�
 </details>
 
 <details>
-<summary><b>装不上 jieba / wcferry / pymupdf 会坏吗？</b></summary>
+<summary><b>装不上 jieba / PyMuPDF 等可选包会坏吗？</b></summary>
 
-不会。三者都是可选增强：缺 jieba 自动回退 3-gram 分词，缺 wcferry 只是微信不可用，缺 pymupdf 时 PDF 只登记元数据。「系统诊断」里会标为提醒而不是错误。
+不会。核心功能只用 Python 标准库。缺 jieba 自动回退 3-gram 分词（v3.5.0 另有语料自适应词典与短专业词兜底，检索照常可用），缺 PyMuPDF 时 PDF 只登记元数据。「系统诊断」里会标为提醒而不是错误。微信相关依赖自 v3.2.0 起已不再需要。
 
 </details>
 
 <details>
 <summary><b>我的资料会不会被上传 / 泄露？</b></summary>
 
-不会。服务只监听 `127.0.0.1`，不对外暴露；所有资料、索引、密钥只在本机；`state/` 已被 gitignore。对 QQ / 微信只读或只监听，不修改群内任何内容。
+不会。服务只监听 `127.0.0.1`，不对外暴露；所有资料、索引、密钥只在本机；`state/` 已被 gitignore。对 QQ 云端**只读**，不修改群内任何内容，也绝不读取加密聊天数据库。
 
 </details>
 
@@ -247,7 +247,7 @@ sha256sum resource-manager-installer.bat
 | 我想… | 文档 |
 | --- | --- |
 | 看项目全貌、能力表、架构图、API、FAQ | [项目主页 README](../README.md) |
-| 看微信监听采集 / 群文件三级分类的实现细节 | [FEATURES.md](FEATURES.md) |
+| 看分类与检索实现细节（含历史微信方案的取舍，v3.2.0 起微信能力已移除） | [FEATURES.md](FEATURES.md) · [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 看全部历史版本是否可用、如何回退 | [VERSION_AUDIT.md](VERSION_AUDIT.md) |
 | 看每次迭代改了什么 | [CHANGELOG.md](CHANGELOG.md) · [开发者日志 DEVLOG.md](DEVLOG.md) |
 | 看验收清单与版本存档说明 | [RELEASE.md](RELEASE.md) |

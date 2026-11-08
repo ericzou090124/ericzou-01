@@ -37,6 +37,7 @@
 ### 文档 / 自测
 
 - README / INSTALL / START_HERE / DEVLOG 同步 v3.5.0；发行包加入 `lib/vocab.py`。
+- **发布自检修正**：清理 v3.2.0 之后残留在 `INSTALL.md` / `FEATURES.md` / `GUIDE.md` / `docs/README.md` / `新手上手指南.md` / `requirements.txt` 里的微信与「三级分类」过期描述（历史文档加醒目版本提示，不删历史决策记录）；`tools/sync_github_releases.py` 更新仓库简介、Release 三步速通与展开版指南到 v3.5.0，修复 Release 标题被拦腰截断、瞬时断连阻断资产上传、历史 Release 正文失败连带跳过最新版资产三个问题。
 - `smoke_test.py` 新增 [26]~[29]（泛化、全文、已有库、框选保存）→ **ALL PASS**；`test_v3.py` 新增 [H] 段 → **66/66 PASS**；`verify_release.py` 加入新端点与关键文件校验。
 - 真实闭环实测：框选新增 1 群再恢复、导入 3 份真实文件 → 成功 3/3、报告生成、大纲 🆕 3 处、`obsidian://open` 返回 `opened=True / method=obsidian_uri`、库内已导入 53 份。
 

@@ -1,7 +1,14 @@
 # 新增功能详解：微信群文件监听采集 · 群文件分类 · 内容驱动泛化分类
 
+> [!WARNING]
+> **本文是 v3.1.0 及更早版本的历史技术资料，不是当前版本的使用说明。**
+> **v3.2.0 已按需求彻底删除微信登录与微信采集能力**（`lib/wechat*.py` 已移除，界面不再有微信入口）；
+> 分类体系也在 v3.2.0 重写为「学科 / 类型 / 来源」三个**单值维度**，v3.5.0 进一步引入 `lib/vocab.py` 语料自适应检索词典。
+> 当前功能、安装与完整闭环请以 **[INSTALL.md](INSTALL.md)** 和根目录 **[README.md](../README.md)** 为准。
+> 下文涉及微信、WeChatFerry、`lib/wechat_wcf.py`、三级分类等内容**仅供历史回溯**。
+
 > 本文面向想理解或二次开发这些功能的人。只想使用请读根目录 [README.md](../README.md)。
-> 实现入口：`lib/wechat_wcf.py`、`lib/classify.py`、`lib/taxonomy.py`、`lib/catalog.py`、`server.py`、`config.json`。
+> 历史实现入口：`lib/classify.py`、`lib/catalog.py`、`server.py`、`config.json`。
 > 版本基线：v3.1.0（微信适配器自 v1.5.0 引入、v1.9.0 加固；分类词库 v2.8.0 修正泛化词；v3.0.0 修漏项；v3.1.0 增加内容驱动的泛化分类）。
 
 ---

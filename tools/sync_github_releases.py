@@ -41,13 +41,14 @@ API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 WEB = f"https://github.com/{OWNER}/{REPO}"
 
 DESCRIPTION = (
-    "QQ / 微信群文件 → 本地 Obsidian 知识库：三级自动分类、微信监听采集、"
-    "SQLite FTS5 全文检索、AI 防臆造问答。Python 标准库实现，零第三方硬依赖，数据全在本机。"
+    "QQ 群文件 → 本地 Obsidian 知识库：全量群聊框选、单值自动分类、"
+    "语料自适应 AI 泛化检索、导入后自动打开 Obsidian 并读取全文、库内 AI 助手。"
+    "Python 标准库实现，零第三方硬依赖，数据全在本机。"
 )
 TOPICS = [
-    "obsidian", "qq", "wechat", "knowledge-base", "group-files",
+    "obsidian", "qq", "knowledge-base", "group-files", "auto-classification",
     "full-text-search", "sqlite-fts5", "python", "local-first",
-    "ai-search", "wechatferry", "napcat", "note-taking",
+    "ai-search", "napcat", "note-taking", "obsidian-plugin",
 ]
 KNOWN_FIX = {f"v1.{n}.0": f"v1.{n}.0-p1" for n in (3, 4, 5, 6)}
 
@@ -64,16 +65,16 @@ FOOTER = """
 
 > 上面三条直链**永远指向最新版**。要拿本页面这个历史版本，请点本页下方的 `Source code (zip)`，或 `git checkout <tag>`。
 
-**三步速通**：① 装 Python 3.10+（Windows 安装时勾选 `Add python.exe to PATH`）→ ② 双击安装器 → ③ 浏览器打开 `http://127.0.0.1:8787`，点顶部「首次配置」，按向导装 NapCat、勾选 QQ 群。
+**三步速通**：① 装 Python 3.10+（Windows 安装时勾选 `Add python.exe to PATH`）→ ② 双击安装器 → ③ 浏览器打开 `http://127.0.0.1:8787`，点顶栏「群聊」读取并框选本 QQ 的全部群。
 
-**完整使用闭环**：刷新来源 → 三级分类浏览（领域 / 科目 / 类型）→ 勾选并**显式确认下载** → 全文检索 / 问 AI → Obsidian 打开生成的独立知识库 → 「系统诊断」检查运行状态。
+**完整使用闭环**：读取并框选群聊 → 顶栏「刷新来源」只读盘点 → 左栏按「学科 / 类型 / 来源」逐级浏览（计数严格一致）→ 勾选并**显式确认下载**，或主页「Obsidian 知识库」一键批量导入（可选已有库 / 新建库）→ **自动打开 Obsidian 并显示本次导入报告**，新文件在原有分类大纲里带 🆕 标记 → 右侧「AI 问答」或库内 AI 助手检索全部资料、读取已导入文件全文。
 
 📖 **零基础图文教程（含常见问题、启动/停止/更新/卸载、macOS / Linux）**：[{web}/blob/main/docs/INSTALL.md]({web}/blob/main/docs/INSTALL.md)
 
 ### 文档
 
 - [项目主页（README）]({web}#readme) · [零基础安装教程]({web}/blob/main/docs/INSTALL.md)
-- [新增功能详解：微信监听采集 / 群文件分类]({web}/blob/main/docs/FEATURES.md)
+- [分类与检索实现细节（历史资料，微信能力已移除）]({web}/blob/main/docs/FEATURES.md) · [架构说明]({web}/blob/main/docs/ARCHITECTURE.md)
 - [全版本可用性审计报告]({web}/blob/main/docs/VERSION_AUDIT.md)
 - [更新日志]({web}/blob/main/docs/CHANGELOG.md) · [开发者日志]({web}/blob/main/docs/DEVLOG.md)
 - [存档说明与验收清单]({web}/blob/main/docs/RELEASE.md)
@@ -89,37 +90,38 @@ LATEST_GUIDE = """
 <summary><b>① 准备工作（一次性）</b></summary>
 
 - 装 [Python 3.10+](https://www.python.org/downloads/)，Windows 安装时**务必勾选 `Add python.exe to PATH`**。
-- QQ 群文件需要本机 [NapCat](https://napneko.github.io/) 扫码登录；**不用提前装**，首次配置向导会带你做。
-- Obsidian、本地大模型、WeChatFerry 都是可选增强，缺了程序照常跑。
+- QQ 群文件需要本机 [NapCat](https://napneko.github.io/)（OneBot 11）扫码登录；没装也能先以「离线快照」浏览本机已缓存的群目录。
+- Obsidian 与本地大模型都是**可选增强**：装了 Obsidian 才能体验「导入后自动打开」；模型没开时 AI 自动降级为纯本地检索，仍不编造答案。
 
 </details>
 
 <details>
 <summary><b>② 安装并启动</b></summary>
 
-双击 `resource-manager-installer.bat`：自动解压到 `C:\\Users\\你的用户名\\resource-manager`，启动仅监听 `127.0.0.1:8787` 的本地服务并打开浏览器。
+双击 `resource-manager-installer.bat`：自动解压、启动仅监听 `127.0.0.1:8787` 的本地服务并打开浏览器。
 若浏览器没自动打开，手动访问 `http://127.0.0.1:8787`。
 下载的是 `.zip` 的话，先「全部提取」到空文件夹，再双击 `start.bat`；**不要在压缩包预览里直接双击 bat**。
 
 </details>
 
 <details>
-<summary><b>③ 首次配置向导（界面点 3 下）</b></summary>
+<summary><b>③ 读取并框选我的 QQ 群（v3.5.0）</b></summary>
 
-顶部「首次配置」→「开始配置」：① 装 NapCat 并手机 QQ 扫码 → ② 点「自动列出我的群并勾选」或手填 `群名,群号` → ③ 完成。
-配置只写本机 `config.json`，不上传。没有 NapCat 也能进「离线快照」模式先浏览分类。
+顶栏「**群聊**」→ 弹窗里点「**读取我的 QQ 群**」→ 用搜索框按群名 / 群号筛选，可「全选 / 全不选」、可手动补群号 → 「**保存选中群**」。
+在线时拉取本 QQ 加入的**全部群**（本机实测 28 个），离线时也能从本机目录元数据列出已缓存的真实群号。
+保存后自动刷新分类树；左栏「群聊范围」下拉还能随时只看某一个群，AI 问答也跟随该范围。配置只写本机 `config.json`，不上传。
 
 </details>
 
 <details>
-<summary><b>④ 从下载到可问答的完整闭环</b></summary>
+<summary><b>④ 从分类到 Obsidian 的完整闭环</b></summary>
 
-1. 顶栏「刷新来源」：只读列群文件，自动三级分类，**不下载任何文件**。
-2. 左栏展开分类树，中栏预览元数据 / 摘要。
-3. 勾选文件 → 「下载已选」→ 在确认框确认（下载闸门必须显式确认）。
-4. 顶栏搜索框回车做全文检索，或点「问 AI」；AI 只依据已下载正文，标注来源，找不到就直说。
-5. Obsidian「打开文件夹作为库」选界面显示的库路径（默认 `~/Desktop/资源管理`，**独立新库，不动原有笔记**）。
-6. 顶栏「系统诊断」随时看配置 / QQ 在线 / 索引篇数 / 库路径。
+1. 顶栏「刷新来源」：只读递归遍历群文件目录，自动按「**学科 / 类型 / 来源**」三个单值维度分类，**不下载任何文件**，任意层级计数之和严格等于文件总数。
+2. 左栏展开分类树，中栏看文件列表；顶栏搜索框做全文检索。
+3. 右侧「**AI 问答**」直接问任意学科：`lib/vocab.py` 从真实文件名里自动学词（不硬编码学科词表），「罗尔 / 马原 / 线代 / 复变函数」与「四六级」同样召回准确，回答列出「共命中 N 份」和可点击源索引。
+4. 主页「**Obsidian 知识库**」卡片 → 「一键批量导入」：可挑**已有库或新建库**，导入需显式确认；完成后**自动用 `obsidian://open` 打开库并定位「00-本次导入.md」报告**。
+5. 在原有分类大纲里，本次新增文件带 **🆕** 标记；每篇笔记写入**完整正文**，AI 插件（v1.2.0）自动部署。
+6. 库内 AI 可选「AI 问答 · 全部资料 / 全部资料清单 / 仅已导入正文」，点源索引「读取全文」看已导入文件的完整正文。
 
 </details>
 
@@ -132,9 +134,9 @@ LATEST_GUIDE = """
 | 停止 | 双击 `tools\\stop.bat` 或关闭 python 服务窗口 |
 | 更新 | 重新下载最新安装器双击；`config.json` / `state/` / Obsidian 库都会保留 |
 | 卸载 | 停服务 → 删程序目录；不写注册表、不设自启 |
-| 验证 | `python tools/smoke_test.py` 看到 `ALL PASS` |
+| 验证 | `python tools/smoke_test.py` 看到 `ALL PASS`；`python tools/test_v3.py` 看到全 PASS |
 
-双击没反应 → 九成是 Python 没勾 PATH；提示「离线快照」→ 点「QQ 登录」扫码；搜不到内容 → 该文件还没下载（未下载只有元数据）。
+双击没反应 → 九成是 Python 没勾 PATH；提示「离线快照」→ 检查 NapCat 后点「刷新来源」；导入后没自动打开 → 确认已装 Obsidian，或点主页「在 Obsidian 打开」手动拉起；搜不到内容 → 该文件还没下载（未下载只有元数据）。
 更多见 [完整教程的常见问题]({web}/blob/main/docs/INSTALL.md#-常见问题)。
 
 </details>
@@ -163,14 +165,19 @@ def request(method: str, url: str, tok: str, payload: dict | None = None,
         "Authorization": "Bearer " + tok, "Accept": accept,
         "Content-Type": "application/json", "User-Agent": "resource-manager-release-sync",
     })
-    try:
-        with urllib.request.urlopen(req, timeout=45) as r:
-            raw = r.read().decode()
-            return r.status, (json.loads(raw) if raw else {})
-    except urllib.error.HTTPError as e:
-        return e.code, {"error": e.read().decode()[:500]}
-    except Exception as e:
-        return -1, {"error": f"{type(e).__name__}: {e}"}
+    # 本机代理偶发 RemoteDisconnected / ConnectionReset，重试一次即可恢复；
+    # 不重试会导致某个历史 Release 正文更新失败，进而连带跳过资产上传。
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=45) as r:
+                raw = r.read().decode()
+                return r.status, (json.loads(raw) if raw else {})
+        except urllib.error.HTTPError as e:
+            return e.code, {"error": e.read().decode()[:500]}
+        except Exception as e:
+            if attempt == 1:
+                return -1, {"error": f"{type(e).__name__}: {e}"}
+    return -1, {"error": "unreachable"}
 
 
 def changelog_sections() -> dict[str, str]:
@@ -184,11 +191,27 @@ def changelog_sections() -> dict[str, str]:
 
 
 def short_subject(section: str, fallback: str) -> str:
+    """从 CHANGELOG 段落里取一句干净的 Release 标题。
+
+    v3.5.0 的首行是加粗长句（「**主线：……**」），旧实现会把它拦腰截断，
+    在 Releases 列表里显示成半截 Markdown；这里统一去强调符、去「主线：」前缀，
+    并优先在自然标点处断句。
+    """
     lines = [l.strip() for l in section.splitlines()[1:] if l.strip()]
     for l in lines:
         if l.startswith(("#", "|", "-", ">")):
             continue
-        return l[:46].rstrip("。 ·")
+        s = re.sub(r"[*_`]", "", l)
+        s = re.sub(r"^主线[:：]\s*", "", s)
+        s = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", s).strip()
+        if not s:
+            continue
+        for sep in ("——", "。", "；", "，", ","):
+            i = s.find(sep)
+            if 12 <= i <= 46:
+                s = s[:i]
+                break
+        return s[:46].rstrip("。 ·、：-—")
     return fallback
 
 
@@ -348,6 +371,7 @@ def main() -> int:
                 continue
             rel = by_tag[t]
             s, r = request("PATCH", API + "/releases/" + str(rel["id"]), tok, {
+                "name": f"{t} · {short_subject(sections.get(t, ''), '历史补丁' if t.endswith('-p1') else '版本更新')}",
                 "body": body, "make_latest": "true" if t == latest else "false"})
             if s == 200:
                 updated += 1
@@ -373,7 +397,10 @@ def main() -> int:
             print(f"[FAIL-create] {t} -> {s} {r}")
 
     print(f"\n完成：新建 {created} / 更新 {updated} / 失败 {failed}")
-    if a.assets_dir and failed == 0:
+    if a.assets_dir:
+        # 历史 Release 正文偶发失败不应阻断最新版的资产上传；失败数仍计入退出码。
+        if failed:
+            print(f"\n注意：{failed} 个历史 Release 正文更新失败，继续上传最新版资产")
         d = Path(a.assets_dir)
         if not d.is_absolute():
             d = ROOT / d
