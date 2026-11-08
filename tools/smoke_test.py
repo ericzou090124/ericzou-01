@@ -20,10 +20,14 @@
   新库状态 / 库内检索、离线导入三道闸门（空清单 / 未确认 / 越界路径）
 - v3.5.0：语料自适应词典泛化（简称/共现/无特化词表）、库内 AI 读取全部目录与完整正文、
   本机已有 Obsidian 库发现、群聊框选批量保存且代号不漂移
+- v3.6.0：QQ 账号冲突识别与恢复状态机、NapCat 快速登录/OneBot 就绪校验、离线导入自动放宽、
+  新 Obsidian 库注册表登记（不删其它库）、一键刷新网页 / 换号 / 全量群聊入口
+  （本节全部只读，不触发真实 NapCat 重启或换号）
 """
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -532,15 +536,28 @@ def main():
     if _allq.get("scanned") != len(catalog.items(cat)):
         fail(f"[27] scope=all 未覆盖全目录：{_allq.get('scanned')}")
     _dl = [x for x in catalog.items(cat) if x.get("downloaded")]
-    if _dl:
-        _ct = _vault.content(_dl[0]["id"], cat)
-        if not _ct.get("ok") or _ct.get("body_chars", 0) <= 0:
-            fail("[27] 已导入资料读不到完整正文")
-        _note_path = config.vault() / _dl[0]["note"]
+    _with_body = []
+    _no_body = []
+    for _x36 in _dl:
+        (_with_body if _vault.content(_x36["id"], cat).get("body_chars", 0) > 0
+         else _no_body).append(_x36)
+    if _dl and not _with_body:
+        fail("[27] 所有已导入资料都读不到正文（正文抽取链路整体失效）")
+    if _with_body:
+        _ct = _vault.content(_with_body[0]["id"], cat)
+        _note_path = config.vault() / _with_body[0]["note"]
         if _note_path.is_file() and "## 正文全文" not in _note_path.read_text(encoding="utf-8"):
             fail("[27] 笔记未写入完整正文（Obsidian 全局搜索会漏内容）")
+    else:
+        _ct = {}
+    # v3.6.0：扫描件 / .zip / 旧版 .doc 本来就抽不出正文，接口必须如实说明，不能谎报「已读取全文」
+    for _x36 in _no_body[:3]:
+        _empty = _vault.content(_x36["id"], cat)
+        if "已读取全文" in str(_empty.get("note_text") or "") or _empty.get("body_available") is not False:
+            fail(f"[27] 无正文资料仍谎报已读取全文：{_x36.get('name')}")
     print(f"[27] 库内 AI 全文 OK：scope=all 覆盖 {_allq['scanned']} 份；"
-          f"单份正文 {_ct.get('body_chars', 0) if _dl else 0} 字；笔记含全文段")
+          f"可抽取 {len(_with_body)} 份（样例 {_ct.get('body_chars', 0)} 字）；"
+          f"无正文 {len(_no_body)} 份均如实说明")
 
     _tv = _vault.discover_vaults()
     if not _tv or not any(d.get("current") for d in _tv):
@@ -559,6 +576,87 @@ def main():
     config.CFG["sources"]["qq"]["groups"] = _saved_groups
     config.write_json(config.CONFIG_PATH, config.CFG)
     print(f"[29] 群聊框选 OK：{len(_set)} 个群批量保存且代号不变（配置已还原）")
+
+    # ---- v3.6.0：登录冲突识别 / 离线导入放宽 / Obsidian 注册 / 一键能力 ----
+    # 注意：本节只读，不调用 switch_account / recover / napcat restart，
+    # 避免自测改变用户本机 QQ 登录态或抢 3000 端口。
+    from lib import qqlogin as _ql36, napcat_launch as _nl36
+    import inspect as _inspect36
+
+    _uins = _ql36.local_quick_uins()
+    if not all(str(u).isdigit() and 5 <= len(str(u)) <= 11 for u in _uins):
+        fail(f"[30] 本机可快速登录账号列表混入非法 QQ 号：{_uins}")
+    _st36 = _ql36.status()
+    for _k36 in ("already_logged_in", "account_conflict", "need_recover",
+                 "can_recover", "quick_uin", "local_uins", "recover_hint",
+                 "qr_offline_discarded"):
+        if _k36 not in _st36:
+            fail(f"[30] qqlogin.status 缺 v3.6.0 字段 {_k36}")
+    if _st36["account_conflict"] and _st36["need_recover"]:
+        fail("[30] 账号冲突时不应同时建议一键恢复（会反复扫必然失败的码）")
+    if not _st36.get("webui_online") and _st36.get("qr_offline_discarded") \
+            and _st36.get("qr_image"):
+        fail("[30] NapCat 离线却仍在展示缓存死码（扫了手机同意也没反应）")
+    _sig36 = str(_inspect36.signature(_nl36.start))
+    if "require_onebot" not in _sig36 or "uin" not in _sig36:
+        fail(f"[30] NapCat 启动未支持快速登录/OneBot 就绪校验：{_sig36}")
+    if not callable(getattr(_nl36, "onebot_running", None)):
+        fail("[30] 缺少 OneBot 真实在线判定（只看 6099 会误判已登录）")
+    print(f"[30] 登录状态机 OK：本机账号 {len(_uins)} 个、冲突={_st36['account_conflict']}、"
+          f"可恢复={_st36['can_recover']}；未触发任何重启/换号")
+
+    _av36 = _li.available(cat)
+    _narrow36 = _li.pick(cat, ["__v36_no_such_id__"], widen=False)
+    _wide36 = _li.pick(cat, ["__v36_no_such_id__"], widen=True)
+    _wide_narrow36 = _li.pick(cat, ["__v36_no_such_id__"])
+    if _narrow36:
+        fail("[31] 不存在的 id 竟然匹配到了本机文件（离线白名单闸门失效）")
+    if _wide_narrow36:
+        fail("[31] 未开启 widen 时不应自动放宽导入范围")
+    if _av36 and not _wide36:
+        fail(f"[31] 本机有 {len(_av36)} 份可导入文件，widen 仍返回空（0 份导入 bug 回归）")
+    if _wide36 and not all(x.get("id") and x.get("path") for x in _wide36):
+        fail("[31] widen 返回了缺 id/path 的条目")
+    if _wide36 and len(_wide36) > int(config.CFG.get("max_download_per_batch", 30)):
+        fail("[31] widen 突破了单批导入上限")
+    print(f"[31] 离线导入放宽 OK：本机可导入 {len(_av36)} 份；不放宽=0、放宽={len(_wide36)} 份"
+          f"（原始 bug：过滤后前 30 个 id 无交集就报「没有对应文件」）")
+
+    _reg36 = _vault.obsidian_registry()
+    if not _reg36 or not _reg36.is_file():
+        fail("[32] 找不到 Obsidian 注册表 obsidian.json")
+    _before36 = config.read_json(_reg36, {}) or {}
+    _bv36 = _before36.get("vaults") or {}
+    _n_before36 = len(_bv36) if isinstance(_bv36, (dict, list)) else 0
+    _rr36 = _vault.register_vault()
+    _after36 = config.read_json(_reg36, {}) or {}
+    _av36b = _after36.get("vaults") or {}
+    _n_after36 = len(_av36b) if isinstance(_av36b, (dict, list)) else 0
+    if not _rr36.get("ok") or _n_after36 < _n_before36:
+        fail("[32] 登记新库时删除了用户其它 Obsidian 库")
+    _paths36 = [str((v or {}).get("path", "")) if isinstance(v, dict) else str(v)
+                for v in (_av36b.values() if isinstance(_av36b, dict) else _av36b)]
+    if not any(str(config.vault().resolve()).lower() == p.lower() for p in _paths36):
+        fail("[32] 当前目标库未登记进注册表（obsidian://open 可能打开旧库）")
+    if not _vault.status(cat).get("obsidian_registered"):
+        fail("[32] vault.status 未反映注册表登记状态")
+    print(f"[32] 新库登记 OK：注册表 {_n_before36} → {_n_after36} 个库，"
+          f"当前库 {config.vault_name()} 已登记且不删其它库")
+
+    _web36 = Path(ROOT) / "web"
+    _idx36 = (_web36 / "index.html").read_text(encoding="utf-8")
+    _login36 = (_web36 / "login.html").read_text(encoding="utf-8")
+    _app36 = (_web36 / "app.js").read_text(encoding="utf-8")
+    for _tok36 in ("btn-reload", "btn-switch-qq"):
+        if _tok36 not in _idx36:
+            fail(f"[33] 主页缺一键按钮 {_tok36}")
+    for _tok36 in ("btn-page-reload", "btn-switch-qq", "btn-switch-card", "recover("):
+        if _tok36 not in _login36:
+            fail(f"[33] 登录页缺恢复/换号能力 {_tok36}")
+    for _tok36 in ("__manage__", "/api/qqlogin/switch", "/api/groups/set", "refresh: true"):
+        if _tok36 not in _app36:
+            fail(f"[33] 前端缺全量群聊/换号链路 {_tok36}")
+    print("[33] 一键能力 OK：刷新网页 / 换 QQ 扫码 / 读取并添加本 QQ 全部群聊入口齐全")
 
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:

@@ -41,6 +41,7 @@ REQUIRED_IN_ZIP = (
     "web/index.html", "web/app.js", "web/login.html", "web/setup.html",
     "lib/index.py", "lib/napcat_setup.py", "lib/classify.py", "lib/catalog.py",
     "lib/vault.py", "lib/localimport.py", "lib/ai.py", "lib/vocab.py", "lib/download.py",
+    "lib/qqlogin.py", "lib/napcat_launch.py", "lib/qq.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 
@@ -58,9 +59,13 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
   2) 双击 start.bat
        会自动启动本地服务，并打开浏览器到 http://127.0.0.1:8787
        第一次使用：install.bat 会自动检测并修好 NapCat 配置；点顶部「QQ 登录」
-       在页面上直接扫码（不用打开任何 NapCat 控制台），再用顶栏「群聊」按钮
-       「读取我的 QQ 群」：会列出本 QQ 加入的全部群，可搜索、全选、批量框选保存，
-       然后点「刷新来源」即可；不用手改任何配置文件。没登录也能框选本机缓存的群。
+       在页面上直接扫码（不用打开任何 NapCat 控制台）。
+       若「手机已同意、电脑还显示没登录」：多半是这个 QQ 已在电脑 QQ 客户端登录，
+       NapCat 不能重复登录 —— 点顶栏「换 QQ 扫码」用另一个 QQ 扫新码，
+       或退出电脑 QQ 后点「一键恢复登录」；「刷新网页」可随时重来。
+       再用顶栏「群聊」或左栏「＋ 读取 / 添加群聊…」→「读取我的 QQ 群」：
+       列出的是**当前 QQ 加入的全部群**（不是预设的几个），可搜索、全选、手动补群号、
+       批量框选保存，保存后自动刷新分类树；不用手改任何配置文件。没登录也能框选缓存群。
 
   3) 主页「Obsidian 知识库」卡片就是完整链路：
        ① 左侧「分类整理」按学科 / 类型 / 来源逐级下钻（计数严格一致、无空分类）
@@ -68,10 +73,12 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
        ③ 自动抽取正文、按「来源/群聊/领域/学科/类型」分类入库，生成含完整正文的
           预览笔记与多级大纲，新导入文件在原有分类里带 🆕 标记
        ④ 导入完成会自动打开 Obsidian 并定位「00-本次导入.md」报告；网页也弹出成效卡
-       新库默认在 桌面\\QQ群资料Obsidian库，是独立新库，不覆盖你原有的笔记库。
+       新库默认在 桌面\\QQ群资料新库，是**独立新库**，会自动登记进 Obsidian 库列表，
+       不覆盖你原有的任何笔记库。
        也可在导入弹窗 /「挑选 / 新建库」里选本机已有库（保留其原有设置，只追加插件）。
-       库内 AI 可检索全部资料并「读取全文」；AI 问答对任意学科都自动召回，不只擅长四六级。
-       QQ 群文件直链不可用时，会自动改从本机已另存的群文件导入，链路不中断。
+       库内 AI 可检索全部资料并「读取全文」；扫描件 / 压缩包 / 旧版 .doc 无正文会如实说明；
+       AI 问答对任意学科都自动召回，不只擅长四六级。
+       QQ 群文件直链不可用时，会自动从本机已另存的群文件里取满一批导入，不报错、不空转。
 
 【只想一键装好？】
   本压缩包里的 resource-manager-installer.bat 也可以直接双击，
@@ -92,6 +99,10 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
 """
 
 VERSION_TXT = """Resource Manager {version}
+
+本版重点：QQ 账号冲突识别与「一键恢复 / 换 QQ 扫码」、一键刷新网页、
+当前 QQ 全部群聊读取与自由添加、离线批量导入不再报「没有对应文件」、
+独立新 Obsidian 库自动登记并真实导入、无正文资料如实说明。
 
 本压缩包包含仓库全部内容：
   - 程序：server.py / lib/ / web/ / obsidian_plugin/
@@ -154,7 +165,9 @@ def main() -> int:
     zpath = DIST / ZIP_NAME
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for p in files:
-            z.write(p, str(p.relative_to(ROOT)).replace("\\", "/"))
+            rel = str(p.relative_to(ROOT)).replace("\\", "/")
+            # 与自解压安装器共用同一份净化规则，两个发行物的 config.json 必须一致
+            z.writestr(rel, build_installer.package_bytes(p))
         z.write(INSTALLER, INSTALLER_NAME)
         z.writestr("START_HERE.txt", START_HERE.format(version=version).encode("utf-8"))
         z.writestr("VERSION.txt", VERSION_TXT.format(version=version).encode("utf-8"))

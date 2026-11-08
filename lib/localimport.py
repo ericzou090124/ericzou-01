@@ -205,15 +205,54 @@ def run(cat: dict, pairs: list[dict], confirm: bool = False) -> dict:
     }
 
 
-def pick(cat: dict, ids: list[str], limit: int = 0) -> list[dict]:
-    """把「当前筛选范围」的 id 列表与本地可导入文件求交集，返回 (id, path) 清单。"""
-    cap = limit or int(config.CFG.get("max_download_per_batch", 30))
-    want = set(str(i) for i in ids)
+def available(cat: dict | None = None, filters: dict | None = None) -> list[dict]:
+    """本机所有「还没入库、且能与目录元数据精确对上」的真实文件（只读）。"""
+    cat = cat or catalog.load()
+    filters = filters or {}
     out = []
     for f in scan(cat)["files"]:
+        if f["downloaded"]:
+            continue
+        if filters.get("group") and f.get("group") != filters["group"]:
+            continue
+        if filters.get("kind") and f.get("kind") != filters["kind"]:
+            continue
+        out.append({"id": f["id"], "path": f["path"]})
+    return out
+
+
+def pick(cat: dict, ids: list[str], limit: int = 0, widen: bool = False,
+         filters: dict | None = None) -> list[dict]:
+    """把「当前筛选范围」的 id 列表与本地可导入文件求交集，返回 (id, path) 清单。
+
+    v3.6.0 修复：QQ 离线时，服务端原来只把「当前筛选范围前 30 条」拿去和本地文件求交集，
+    一旦这 30 条里没有本机另存的副本就直接报错「没有对应文件、导入 0 份」，
+    即使白名单目录里明明有几十份可导入的真实文件。
+    `widen=True` 时在交集不足时自动补上其它本机可导入文件（仍守全部安全闸门与单批上限）。
+    """
+    cap = limit or int(config.CFG.get("max_download_per_batch", 30))
+    want = set(str(i) for i in ids)
+    filters = filters or {}
+    found = scan(cat)["files"]
+    out: list[dict] = []
+    seen: set[str] = set()
+    for f in found:
         if f["downloaded"] or f["id"] not in want:
             continue
         out.append({"id": f["id"], "path": f["path"]})
+        seen.add(f["id"])
         if len(out) >= cap:
-            break
+            return out
+    if widen:
+        for f in found:
+            if f["downloaded"] or f["id"] in seen:
+                continue
+            if filters.get("group") and f.get("group") != filters["group"]:
+                continue
+            if filters.get("kind") and f.get("kind") != filters["kind"]:
+                continue
+            out.append({"id": f["id"], "path": f["path"]})
+            seen.add(f["id"])
+            if len(out) >= cap:
+                break
     return out

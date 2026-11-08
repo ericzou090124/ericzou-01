@@ -3,6 +3,43 @@
 本文件按版本记录对外可见的变化；开发过程详见 [DEVLOG.md](DEVLOG.md)。
 格式：`## [版本] - 日期`，条目用 `新增 / 修复 / 变更 / 文档` 分类。
 
+## [v3.6.0] - 2026-11-08
+
+**主线：把「登录总是失效、导入报错、新库和换号都要手工折腾」一次性收口 —— 账号冲突能被识别、换 QQ 扫码与一键刷新网页都做成按钮、任意新人都能在当前 QQ 里读取并添加全部群聊、Obsidian 用独立新库真实导入成功。**
+
+### 修复
+
+- **QQ 手机已同意、电脑却始终显示未登录，或登录极慢**（用户截图反馈）。真机诊断结论：WebUI 6099 在线、OneBot 3000 不在线，NapCat 报 `当前账号(3803328585)已登录,无法重复登录` —— 该 QQ 已在桌面 QQ 客户端登录，NapCat 无法重复登录；但旧版仍不断给出**必然扫不进去**的二维码，用户反复扫码反复失败。另发现本机一度同时跑着 3 份 NapCat 实例抢 3000 端口。修复：
+  - `qqlogin.status()` 新增 `already_logged_in` / `account_conflict` / `need_recover` / `can_recover` / `quick_uin` / `local_uins` / `recover_hint`，冲突时**停止展示废码**，直接提示「换号扫码」或「退出电脑 QQ 后一键恢复」；`account_conflict` 与 `need_recover` 互斥，不再引导用户做无效操作。
+  - `napcat_launch` 新增 `onebot_running()`，`start(..., require_onebot=True)` 必须等 `/get_login_info` 真正可用才判成功，不再只看 6099 端口就误判「已登录」；`restart()` 只结束 `napcat_runtime\shell_node` 进程树，不动桌面 QQ 客户端。
+  - **启动方式从 `DETACHED_PROCESS` 改为 `CREATE_NEW_CONSOLE` + 隐藏窗口**：NapCat 需要自己的控制台输出二维码/日志，旧版无控制台启动导致 `cmd.exe` 活着但 `node.exe` 立刻退出。
+  - **NapCat 已经退出后，页面仍展示本机缓存的旧二维码**（终验时真实复现：`napcat_running=false` 但 `qr_source=NapCat 二维码`、`qr_age_s=173`、状态写作「等待扫码」）。没有进程在等扫码确认，这张码扫了手机点同意也毫无反应，是「登录总失效」的另一半原因。现在 WebUI 离线时直接丢弃缓存死码，返回 `qr_offline_discarded=true`，登录页明确提示「已丢弃缓存里的旧二维码」并引导刷新出全新码 / 换号。
+  - 登录页轮询 2.5s → **1.5s**，快速登录账号列表 30 秒缓存，`recover()` 25 秒节流，避免前端轮询反复重启服务。
+  - `WebUI /RestartNapCat` 会继承旧 `-q` 参数，因此换号流程不再依赖它，改为干净重启并重新申请二维码。
+- **一键批量导入报错且实际 0 份导入**（用户截图反馈）。真机复现 `QQ 在线下载不可用，且所选范围内没有本机已另存的对应文件`。根因：`/api/vault/import` 离线兜底只把**当前筛选前 30 个 id** 与本机可导入文件求交集，这 30 个恰好没有本机副本就直接失败，即使白名单目录里明明有 60 份真实文件。修复：`localimport.available()` + `pick(..., widen=True, filters=...)`，交集为空时自动从本机可导入清单取满一批；仍保留 `confirm=true`、白名单目录、文件名精确匹配、扩展名白名单、单批上限全部闸门；返回结果新增 `offline_widened` / `available_local`，前端导入弹窗与结果弹窗都如实说明。真跑 **成功 30/30**。
+- **不再往旧库里导，改用独立新 Obsidian 库**。新建并切换到 `C:\Users\ERICZOU\Desktop\QQ群资料新库`（旧库 `QQ群资料Obsidian库` 保持原样不覆盖），迁移此前 25 份已导入资料。发现新问题：只建文件夹、不写 `%APPDATA%\obsidian\obsidian.json` 时，`obsidian://open?vault=…` 会打开默认旧库或干脆无反应。修复：新增 `vault.obsidian_registry()` / `register_vault()`，在 `init()` / `set_vault()` / `open_in_obsidian()` 自动登记本库（**只追加/更新自己那一条，绝不删除用户其它库**），`vault.status()` 新增 `obsidian_registered`，新增 `POST /api/vault/register`。实测注册表中 3 个库并存，新库为默认打开库。
+- **库内 AI 对扫描件/压缩包/旧版 .doc 谎报「已读取全文」**（本轮自测发现）。55 份已导入资料里有 8 份无法抽取文字（图片型 PDF、`.zip`、`.doc`），旧 `content()` 仍返回「已读取全文，可交给 AI 概括」，会让 AI 把「无正文」误当「内容为空」。现在返回 `body_available=False` 并按格式给出原因（压缩包需解压 / 旧版 Office 建议另存 .docx / 扫描件需 OCR），笔记「正文全文」段同步写明原文件仍可直接打开、AI 仍可按文件名与分类命中。
+
+### 新增
+
+- **一键刷新网页 + 退出登录 / 换 QQ 扫码**：主页新增「刷新网页」「换 QQ 扫码」，登录页新增「刷新网页」「退出登录 / 换 QQ 扫码」和恢复卡里的换号入口。新增 `POST /api/qqlogin/switch` → `qqlogin.switch_account()`：清空自动登录 → 干净重启 NapCat（不继承旧 `-q`）→ 申请全新二维码 → 重置二维码/凭证缓存；弹窗可选「全新扫码」或快速切换到本机已有账号。`local_quick_uins()` 从 `onebot11_*.json` 与 `Documents/Tencent Files/<QQ号>` 目录名发现本机账号（只读目录名，绝不碰聊天数据）。
+- **一键恢复登录**：新增 `POST /api/qqlogin/recover` 与登录页恢复卡；已在线直接成功，否则用本机保存凭证 `SetQuickLogin` 或 NapCat 原生 `-q <QQ号>` 快速登录，必要时重启 NapCat，成功后自动刷新来源元数据。`POST /api/qqlogin/restore` 在端口未起时不再直接报错，先尝试恢复。另新增 `POST /api/napcat/restart`。
+- **当前 QQ 内切换 / 添加任意群聊（新人可用）**：左栏「群聊范围」下拉新增「＋ 读取 / 添加群聊…」直达群聊弹窗；弹窗补新人三步说明、「去登录 / 换号」入口、「读取我的 QQ 群」、搜索、全选/全不选、手动补群号；保存时 `/api/groups/set` 带 `refresh:true`，在线即自动刷新来源与分类树。不用只盯着预先配置的 3 个群，任意新人登录后都能读取本 QQ 的全部群并框选，融入现有分类树 / 文件列表 / AI 问答生态。
+- **Obsidian 新库真实闭环**：`QQ群资料新库` 已入库 **55 份**真实文件、55 篇含全文笔记、55 份原文件、294 页大纲、165 处 🆕 标记、AI 插件已部署、导入报告 7830 字节并自动用 `obsidian://open` 打开定位。
+
+### 变更
+
+- `napcat_launch.start()` 支持 `force` / `require_onebot` / `uin`；`restart()` 支持 `require_onebot` / `force`；`onebot_port()` 与 `onebot_running()` 成为登录就绪判定的唯一事实来源。
+- `config.json` 目标库切换为 `C:\Users\ERICZOU\Desktop\QQ群资料新库`，`vault_name` 同步更新，避免清空路径后又回到旧库。
+
+### 文档 / 自测
+
+- `smoke_test.py` 新增 [30]~[33]：登录冲突状态机、NapCat 快速登录/OneBot 校验、离线导入 widen 闸门、Obsidian 注册不删其它库、一键按钮与全量群聊入口；修正 [27] 让它区分「可抽取正文」与「扫描件无正文」两类真实资料。**本节只读，不触发真实 NapCat 重启或换号**。→ **ALL PASS**。
+- `test_v3.py` 新增 `[I] v3.6.0` 段（页面按钮、状态字段、账号合法性、注册表幂等、离线可导入清单、未确认导入仍被拒绝），同样不调用 `switch` / `recover` / `restart`、不做真实导入。→ **85/85 PASS**。
+- README / INSTALL / DEVLOG / START_HERE / VERSION_TXT / Release 指南同步 v3.6.0；发行包加入 `lib/napcat_launch.py`。
+
+---
+
 ## [v3.5.0] - 2026-11-08
 
 **主线：让这个工具对「任意群、任意学科、任意 Obsidian 库」都同样好用 —— AI 搜索不再只擅长四六级，群聊可以读取并框选全部群，导入完成后立刻自动打开 Obsidian 看到分类成效。**

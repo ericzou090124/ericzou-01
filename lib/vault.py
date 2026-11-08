@@ -8,10 +8,12 @@ v3.5.0：导入后**立刻可见成效** —— 自动用 obsidian:// 打开本�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
+import time
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -142,6 +144,7 @@ def init() -> list[str]:
         "返回 [[00-使用说明]] ／ [[00-批量导入指南]] ／ [[00-本次导入]]。\n"
     )
     _write("00-AI检索说明.md", ai_guide)
+    register_vault(root)  # 新库 / 换机器后自动登记，obsidian://open 才能定位
     return ["00-使用说明.md", "00-批量导入指南.md", "00-AI检索说明.md",
             ".obsidian/", "大纲/", "资源/", "笔记/", "_system/"]
 
@@ -184,7 +187,9 @@ def write_note(x: dict, body: str) -> str:
         if len(body) > cap:
             text += f"\n> 全文共 {len(body)} 字，笔记内收录前 {cap} 字；完整正文可由右侧 AI 面板「读取全文」获取。\n"
     else:
-        text += "（无可提取正文，或尚未下载）\n"
+        text += ("（该原文件没有可抽取的文字正文：扫描件 / 图片型 PDF、压缩包、旧版 .doc 等"
+                 "暂无法转成文本。原文件已完整入库，请点上方「原文件」直接在 Obsidian 打开；"
+                 "AI 检索仍可通过文件名、路径与分类命中这份资料。）\n")
     text += ("\n## 相关入口\n\n"
              "- [[00-资源总览]] · [[00-多级大纲]] · [[00-批量导入指南]] · [[00-AI检索说明]]\n"
              f"- 界面预览：`http://127.0.0.1:8787/?file={x['id']}`\n"
@@ -310,6 +315,18 @@ def status(cat: dict | None = None) -> dict:
     assets = sum(1 for x in dl if (root / x.get("asset", "")).is_file()) if dl else 0
     outlines = len(list((root / "大纲").glob("*.md"))) if (root / "大纲").is_dir() else 0
     plugin = (root / ".obsidian" / "plugins" / "resource-manager-ai" / "main.js").is_file()
+    reg = obsidian_registry()
+    registered = False
+    if reg and reg.is_file():
+        try:
+            data = config.read_json(reg, {}) or {}
+            for item in ((data.get("vaults") or {}).values() if isinstance(data, dict) else []):
+                p = item.get("path") if isinstance(item, dict) else (item if isinstance(item, str) else "")
+                if p and str(Path(p).resolve()).lower() == str(root.resolve()).lower():
+                    registered = True
+                    break
+        except (OSError, ValueError):
+            pass
     by_kind: dict[str, int] = {}
     for x in dl:
         k = x.get("kind") or "其他资料"
@@ -323,6 +340,7 @@ def status(cat: dict | None = None) -> dict:
         "guides": ["00-使用说明.md", "00-批量导入指南.md", "00-AI检索说明.md",
                    "00-资源总览.md", "00-多级大纲.md", REPORT],
         "report": REPORT, "report_exists": (root / REPORT).is_file(),
+        "obsidian_registered": registered,
         "recent": len(recent_ids()),
         "obsidian_auto_open": bool((config.CFG.get("obsidian") or {}).get("open_after_import", True)),
         "structure": "资源/来源/群聊/领域/学科/类型/原文件 · 笔记/同级路径/预览笔记.md · 大纲/多级 MOC",
@@ -430,8 +448,19 @@ def content(item_id: str, cat: dict | None = None) -> dict:
         body = bp.read_text(encoding="utf-8", errors="replace") if bp.is_file() else ""
     except OSError:
         body = ""
-    return {**base, "body": body, "body_chars": len(body),
-            "note_text": "已读取全文，可交给 AI 概括或作为上下文。"}
+    if body.strip():
+        return {**base, "body": body, "body_chars": len(body),
+                "note_text": "已读取全文，可交给 AI 概括或作为上下文。"}
+    # v3.6.0：扫描版 PDF、.zip、旧版 .doc 等没有可抽取正文时，不能再谎报「已读取全文」。
+    # 否则库内 AI 会把「无正文」当成「内容为空」或给出误导性回答。
+    ext = Path(x.get("asset") or x.get("name") or "").suffix.lower()
+    why = ("压缩包含多个文件，需先在 Obsidian 中打开原文件解压" if ext == ".zip"
+           else "旧版二进制 Office 格式，建议另存为 .docx 后重新导入" if ext in (".doc", ".xls", ".ppt")
+           else "扫描件 / 图片型 PDF，暂无 OCR 文本" if ext == ".pdf"
+           else "该格式暂不支持正文抽取")
+    return {**base, "body": "", "body_chars": 0, "body_available": False,
+            "note_text": f"这份资料没有可抽取的文字正文（{why}）；"
+                         "原文件已入库，可在笔记「原文件」处直接打开，AI 检索仍可用文件名与分类命中。"}
 
 
 def refresh_notes(cat: dict | None = None) -> int:
@@ -454,6 +483,66 @@ def refresh_notes(cat: dict | None = None) -> int:
         catalog.save(cat)
         index.sync(cat)
     return n
+
+
+def obsidian_registry() -> Path | None:
+    """Obsidian 本机库注册表（Windows: %APPDATA%/obsidian/obsidian.json）。"""
+    appdata = os.environ.get("APPDATA") or ""
+    if not appdata:
+        return None
+    return Path(appdata) / "obsidian" / "obsidian.json"
+
+
+def register_vault(root: Path | None = None, make_default: bool = True) -> dict:
+    """把本工具生成的库登记进 Obsidian 注册表。
+
+    `obsidian://open?vault=<库名>` 是按**注册表里的库名**解析的；库没登记时，
+    Obsidian 会打开默认库（甚至什么都不做）—— 这正是 v3.5.0「导入后没反应」
+    的一个隐藏原因。登记只**追加/更新自己那一条**，不删别人的库；
+    make_default=True 时把本库设为 Obsidian 启动默认打开的库。
+    """
+    reg = obsidian_registry()
+    if not reg:
+        return {"ok": False, "error": "未找到 Obsidian 注册表（APPDATA 缺失）"}
+    root = (root or v()).resolve()
+    try:
+        data = config.read_json(reg, {}) or {}
+        if not isinstance(data, dict):
+            data = {}
+        vaults = data.get("vaults") or {}
+        if not isinstance(vaults, dict):
+            vaults = {}
+        key = None
+        for k, item in vaults.items():
+            p = (item.get("path") if isinstance(item, dict)
+                 else item if isinstance(item, str) else "")
+            try:
+                if p and Path(p).resolve() == root:
+                    key = k
+                    break
+            except (OSError, ValueError):
+                continue
+        created = key is None
+        if created:
+            key = hashlib.md5(str(root).lower().encode("utf-8")).hexdigest()[:16]
+            vaults[key] = {"path": str(root), "ts": int(time.time() * 1000), "open": False}
+        elif isinstance(vaults[key], dict):
+            vaults[key]["path"] = str(root)
+            vaults[key]["ts"] = int(time.time() * 1000)
+        if make_default:
+            for k, item in vaults.items():
+                if isinstance(item, dict):
+                    item["open"] = (k == key)
+        data["vaults"] = vaults
+        reg.parent.mkdir(parents=True, exist_ok=True)
+        tmp = reg.with_name(reg.name + ".rmtmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(reg)
+        return {"ok": True, "created": created, "id": key, "path": str(root),
+                "registry": str(reg), "default": make_default,
+                "vaults": len(vaults)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:160]}"}
 
 
 def discover_vaults() -> list[dict]:
@@ -535,8 +624,12 @@ def set_vault(target: dict) -> dict:
     cat = catalog.load()
     if path.resolve() != old.resolve():
         config.CFG["vault"] = str(path)
+        # 同步默认库名：否则用户以后清空 vault 路径时又会回到旧库
+        config.CFG["vault_name"] = path.name
         config.write_json(config.CONFIG_PATH, config.CFG)
     init()
+    # 登记到 Obsidian，保证 obsidian://open?vault=<库名> 真能定位到这个新库
+    registry = register_vault(path)
     migrated = 0
     for x in catalog.items(cat):
         if not x.get("downloaded"):
@@ -561,12 +654,14 @@ def set_vault(target: dict) -> dict:
         catalog.save(cat)
         index.sync(cat)
     return {"ok": True, "path": str(path), "name": path.name, "migrated": migrated,
-            "outlines": build_outlines(cat), "vault": status(cat)}
+            "registry": registry, "outlines": build_outlines(cat), "vault": status(cat)}
 
 
 def open_in_obsidian(file_rel: str = "") -> dict:
     """导入后自动拉起 Obsidian 并定位到指定笔记；协议未注册时回退打开库文件夹。"""
     root = v()
+    # 每次打开都确保库在注册表里：新建库 / 手工删过注册表 / 换机器都能自动补上
+    registry = register_vault(root)
     rel = str(file_rel or (config.CFG.get("obsidian") or {}).get("open_file") or REPORT)
     rel = rel.replace("\\", "/")
     if rel.lower().endswith(".md"):
@@ -580,7 +675,7 @@ def open_in_obsidian(file_rel: str = "") -> dict:
             import webbrowser
             webbrowser.open(uri)
         return {"ok": True, "opened": True, "method": "obsidian_uri",
-                "uri": uri, "path": str(root), "file": rel}
+                "uri": uri, "path": str(root), "file": rel, "registry": registry}
     except Exception as e:
         err = f"{type(e).__name__}: {str(e)[:120]}"
     try:

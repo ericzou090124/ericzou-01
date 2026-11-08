@@ -10,6 +10,8 @@
   F. 群聊管理（增减群 + 群筛选）
   G. v3.4.0：主页 Obsidian 完整链路、库状态 / 库内检索、离线导入闸门、四六级与 CET 精准召回
   H. v3.5.0：AI 语料自适应泛化、全量群聊框选、导入后报告/🆕/自动打开、库内 AI 全文读取
+  I. v3.6.0：账号冲突识别/一键恢复/换号入口、离线导入自动放宽、新库 Obsidian 注册表登记、
+     一键刷新网页与全量群聊切换（本节只读，不触发 NapCat 重启/换号/真实导入）
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -283,14 +285,26 @@ def main() -> int:
               f"scanned={allq.get('scanned')} total={st}")
 
         files = get("/api/files?dim=subject&node=%5B%5D&limit=500")[2].get("items", [])
-        dl = next((x for x in files if x.get("downloaded")), None)
-        if dl:
-            ct = get("/api/vault/content?id=" + urllib.parse.quote(dl["id"]))[2]
+        dls = [x for x in files if x.get("downloaded")]
+        body_hit, empty_hit = None, None
+        for x in dls[:20]:
+            ct0 = get("/api/vault/content?id=" + urllib.parse.quote(x["id"]))[2]
+            if ct0.get("body_chars", 0) > 0 and body_hit is None:
+                body_hit = (x, ct0)
+            elif ct0.get("body_chars", 0) == 0 and empty_hit is None:
+                empty_hit = (x, ct0)
+        if body_hit:
+            x, ct = body_hit
             check("库内 AI 可读取已导入资料的完整正文",
                   ct.get("ok") and ct.get("body_chars", 0) > 0,
-                  f"{str(dl.get('name', ''))[:18]} body_chars={ct.get('body_chars')}")
+                  f"{str(x.get('name', ''))[:18]} body_chars={ct.get('body_chars')}")
         else:
-            check("库内 AI 可读取已导入资料的完整正文", False, "没有已导入条目")
+            check("库内 AI 可读取已导入资料的完整正文", False, "没有含正文的已导入条目")
+        if empty_hit:
+            check("无正文资料如实说明，不谎报「已读取全文」",
+                  "已读取全文" not in str(empty_hit[1].get("note_text") or "")
+                  and empty_hit[1].get("body_available") is False,
+                  str(empty_hit[0].get("name", ""))[:18])
 
         gr = get("/api/groups")[2]
         check("群聊框选可给出全部候选群（不只已配置的 3 个）",
@@ -314,6 +328,51 @@ def main() -> int:
         manifest = json.loads((config.PLUGIN_SRC / "manifest.json").read_text(encoding="utf-8"))
         check("Obsidian AI 插件已升级到 1.2.0", manifest.get("version") == "1.2.0",
               f"version={manifest.get('version')}")
+
+        print("\n[I] v3.6.0 登录恢复/换号 · 离线导入放宽 · 新库登记 · 一键能力")
+        # 安全边界：本节绝不调用 /api/qqlogin/switch、/recover、/api/napcat/restart，
+        # 也不做真实导入，避免端到端测试改变用户本机 QQ 登录态或 Obsidian 库内容。
+        for token in ("btn-reload", "btn-switch-qq"):
+            check("主页含一键按钮「" + token + "」", token in home, "")
+        for token in ("btn-page-reload", "btn-switch-qq", "btn-switch-card", "recover("):
+            check("登录页含恢复/换号能力「" + token + "」", token in login_html, "")
+        check("登录页能识别账号冲突并停止展示废码",
+              "account_conflict" in login_html and "账号冲突" in login_html, "")
+        app_js = (config.WEB / "app.js").read_text(encoding="utf-8")
+        for token in ("__manage__", "/api/qqlogin/switch", "refresh: true", "switchQQModal"):
+            check("前端含全量群聊/换号链路「" + token + "」", token in app_js, "")
+
+        qs = get("/api/qqlogin/status")[2]
+        check("登录状态含 v3.6.0 冲突识别与恢复字段",
+              all(k in qs for k in ("already_logged_in", "account_conflict",
+                                    "need_recover", "can_recover", "quick_uin",
+                                    "local_uins", "recover_hint", "qr_offline_discarded")),
+              f"conflict={qs.get('account_conflict')} local_uins={len(qs.get('local_uins', []))}")
+        check("NapCat 离线时不展示必然无反应的缓存死码",
+              not (qs.get("qr_offline_discarded") and qs.get("qr_image")),
+              f"discarded={qs.get('qr_offline_discarded')} image={bool(qs.get('qr_image'))}")
+        check("账号冲突时不再建议必然失败的一键恢复",
+              not (qs.get("account_conflict") and qs.get("need_recover")), "")
+        check("本机快速登录账号均为合法 QQ 号",
+              all(str(u).isdigit() and 5 <= len(str(u)) <= 11
+                  for u in qs.get("local_uins", [])),
+              f"{qs.get('local_uins', [])[:4]}")
+
+        vs3 = get("/api/vault/status")[2]
+        check("目标库已登记进 Obsidian 注册表",
+              vs3.get("obsidian_registered") is True, f"path={vs3.get('path')}")
+        reg = post("/api/vault/register")
+        check("/api/vault/register 幂等且不删除其它库",
+              reg.get("ok") is True and reg.get("vaults", 0) >= 3,
+              f"vaults={reg.get('vaults')} created={reg.get('created')}")
+
+        scan = get("/api/local/scan")[2]
+        check("离线导入可列出本机真实可导入文件",
+              scan.get("ok") is True and isinstance(scan.get("files"), list),
+              f"matched={scan.get('matched')}")
+        guard = post("/api/vault/import", {"confirm": False, "ids": ["__v36_guard__"]})
+        check("未确认的一键导入仍被闸门拒绝（测试不写盘）",
+              guard.get("ok") is not True, f"error={str(guard.get('error', ''))[:40]}")
 
     finally:
         srv.shutdown()

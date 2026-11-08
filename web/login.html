@@ -41,6 +41,8 @@
   <div class="topbar">
     <h1>QQ 一键登录</h1>
     <div class="spacer"></div>
+    <button class="btn small" id="btn-page-reload" title="重新载入本页">刷新网页</button>
+    <button class="btn small warn" id="btn-switch-qq" title="退出当前 QQ，换另一个 QQ 扫码">退出登录 / 换 QQ 扫码</button>
     <a class="btn small" href="/" target="_self">返回资源管理器</a>
   </div>
 
@@ -55,6 +57,17 @@
       <span class="muted" id="updated" style="margin-left:auto"></span>
     </div>
     <div class="setup" id="setup">正在读取安装自检结果…</div>
+  </section>
+
+  <section class="card" id="recover-card" style="display:none">
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px">QQ 已登录，但群文件接口没启动</div>
+    <div class="note" id="recover-text"></div>
+    <div class="row" style="justify-content:flex-start;margin-top:10px">
+      <button class="btn small primary" id="btn-recover">一键恢复登录</button>
+      <button class="btn small warn" id="btn-switch-card">退出登录 / 换 QQ 扫码</button>
+      <button class="btn small" id="btn-qr-anyway">仍要重新扫码</button>
+    </div>
+    <div class="note" id="recover-steps" style="margin-top:10px"></div>
   </section>
 
   <section class="card">
@@ -86,7 +99,10 @@
 
 <script>
 const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let lastQrKey = '', done = false, restoring = false, autoStarted = false, busy = false;
+let autoRecovered = false, autoRecoverTried = false, recovering = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function banner(text, cls = 'info') {
@@ -135,6 +151,33 @@ async function restore() {
   restoring = false;
 }
 
+async function recover(auto = false) {
+  if (recovering || done) return;
+  recovering = true;
+  banner('正在恢复登录：先用本机已保存的凭证免扫码登录，必要时自动重启 NapCat（约 10~30 秒）…', 'info');
+  pill('#p-phase', '正在恢复登录', 'warn');
+  $('#recover-steps').textContent = '① 检查群文件接口 → ② 免扫码快速登录 → ③ 必要时重启 NapCat';
+  const btn = $('#btn-recover'); btn.disabled = true; btn.textContent = '恢复中…';
+  try {
+    const r = await post('/api/qqlogin/recover', {});
+    $('#recover-steps').innerHTML = (r.steps || []).map((s, i) => `<div>${i + 1}. ${esc(s)}</div>`).join('');
+    if (r.ok && r.onebot_online) {
+      done = true;
+      banner('恢复成功：群文件接口已在线，' + ((r.refresh && r.refresh.items) || 0) + ' 条群文件元数据已刷新。即将返回资源管理器…', 'ok');
+      pill('#p-phase', '登录完成', 'ok');
+      pill('#p-onebot', '群文件接口 在线', 'ok');
+      setTimeout(goHome, 1200);
+      return;
+    }
+    banner((auto ? '自动恢复未成功：' : '恢复未成功：') + (r.error || '请再点一次「一键恢复登录」'), 'warn');
+    pill('#p-phase', '等待恢复', 'warn');
+  } catch (e) {
+    banner('恢复请求失败：' + e + '；可再点一次「一键恢复登录」。', 'warn');
+  }
+  btn.disabled = false; btn.textContent = '一键恢复登录';
+  recovering = false;   // 自动只尝试一次；之后由用户点按钮手动重试
+}
+
 async function autoStart() {
   if (autoStarted || busy) return;
   autoStarted = true; busy = true;
@@ -173,6 +216,35 @@ function render(d) {
     tick();
   };
 
+  // v3.6.0：QQ 核心已登录但 OneBot 3000 没起 —— 不再展示一张必然扫不进去的二维码；
+  // 只是「有保存凭证、还没登录」时保留二维码，同时给出一键恢复按钮。
+  const stuck = d.need_recover || (d.is_login && !d.onebot_online);
+  const showCard = d.can_recover || stuck;
+  $('#recover-card').style.display = showCard ? '' : 'none';
+  if (showCard) {
+    $('#recover-text').innerHTML = esc(d.hint || '群文件接口未启动，可一键恢复登录。')
+      + (d.login_error ? '<br><span style="color:var(--muted)">NapCat 提示：' + esc(d.login_error) + '</span>' : '')
+      + (d.quick_uin ? '<br>本机已保存登录凭证：' + esc(d.quick_uin) + '（免扫码）' : '');
+    $('#recover-card').querySelector('div').textContent = d.account_conflict
+      ? '当前 QQ 与电脑端冲突 · 请换号扫码' : (stuck
+        ? 'QQ 已登录，但群文件接口没启动' : '群文件接口未启动 · 可以免扫码快速恢复');
+  }
+  if (d.account_conflict) {
+    pill('#p-phase', '账号冲突 · 请换号', 'warn');
+    $('#qrframe').innerHTML = '<div class="placeholder">这张码扫不了：当前 QQ 已经在电脑端 QQ 客户端登录。<br>'
+      + '请点上方「退出登录 / 换 QQ 扫码」用另一个 QQ 扫码；<br>'
+      + '或先退出电脑 QQ 客户端，再点「一键恢复登录」。</div>';
+    return;
+  }
+  if (stuck) {
+    pill('#p-phase', d.onebot_online ? '登录成功' : 'QQ 已登录 · 接口未启动', d.onebot_online ? 'ok' : 'warn');
+    $('#qrframe').innerHTML = '<div class="placeholder">不用再扫码：QQ 已经登录了。<br>'
+      + '正在自动恢复群文件接口，恢复完成后会直接跳回资源管理器。</div>';
+    if (!autoRecoverTried && !busy && !recovering) {
+      autoRecoverTried = true; autoRecovered = true; recover(true);
+    }
+    return;
+  }
   if (d.is_login) {
     pill('#p-phase', '登录成功', 'ok');
     $('#qrframe').innerHTML = '<div class="placeholder">登录已完成<br>正在自动恢复在线来源…</div>';
@@ -189,15 +261,23 @@ function render(d) {
     }
     $('#qrframe').innerHTML = '<img alt="QQ 登录二维码" src="' + d.qr_image + '">';
   } else {
-    $('#qrframe').innerHTML = '<div class="placeholder">暂时没有可用二维码<br>'
-      + '点下方「刷新二维码」，本页会自动拉起 NapCat 并向 QQ 申请新码</div>';
+    $('#qrframe').innerHTML = '<div class="placeholder">'
+      + (d.qr_offline_discarded
+          ? '已丢弃缓存里的旧二维码<br> NapCat 没运行，那张码扫了也不会有反应。<br>'
+          : '暂时没有可用二维码<br>')
+      + '点下方「刷新二维码」，本页会自动拉起 NapCat 并向 QQ 申请全新二维码；<br>'
+      + '想换账号请点上方「退出登录 / 换 QQ 扫码」</div>';
   }
   if (d.login_error) banner('QQ 登录提示：' + d.login_error, 'warn');
   else if (d.hint && !d.qr_image && !busy) banner(d.hint, 'warn');
   else if (d.qr_image && d.qr_source && !busy && !lastQrKey) banner('二维码已就绪（' + d.qr_source + '），请扫码。', 'info');
 
-  // 网关没跑：自动拉起一次，用户不必再点「启动 NapCat」
-  if (d.need_start && !autoStarted && !busy) autoStart();
+  // 网关没跑：本机有保存凭证时优先免扫码快速登录（带 -q 启动 NapCat），
+  // 否则才走二维码流程。两种都不需要用户额外操作。
+  if (d.need_start && !autoStarted && !busy && !done && !recovering) {
+    if (d.quick_uin && !autoRecoverTried) { autoRecoverTried = true; recover(true); }
+    else autoStart();
+  }
 
   const accs = (d.accounts || []).filter(a => a.quick);
   $('#accounts').innerHTML = accs.length
@@ -250,8 +330,37 @@ $('#btn-start').onclick = async () => {
   tick();
 };
 
+$('#btn-recover').onclick = () => recover(false);
+$('#btn-page-reload').onclick = () => location.reload();
+async function switchQQ() {
+  if (recovering) return;
+  if (!window.confirm('将退出当前 QQ 的登录态，重启 NapCat 并生成一张全新二维码，用另一个 QQ 扫码。继续吗？')) return;
+  busy = true;
+  banner('正在退出当前 QQ、重启 NapCat、申请全新二维码（约 10~20 秒）…', 'info');
+  try {
+    const r = await post('/api/qqlogin/switch', {});
+    if (!r.ok) throw new Error(r.error || '未知原因');
+    banner((r.steps || []).join(' → ') + '；页面即将刷新，请用新 QQ 扫码。', 'ok');
+    setTimeout(() => location.reload(), 1600);
+  } catch (e) {
+    banner('换号失败：' + e + '；可再点一次，或回到资源管理器。', 'warn');
+  }
+  busy = false;
+}
+$('#btn-switch-qq').onclick = switchQQ;
+$('#btn-switch-card').onclick = switchQQ;
+$('#btn-qr-anyway').onclick = async () => {
+  autoRecoverTried = true;          // 停止自动恢复，交给用户显式扫码
+  banner('正在向 QQ 申请一张全新的二维码…', 'info');
+  lastQrKey = '';
+  try { const r = await post('/api/qqlogin/refresh'); banner(r.msg || r.error || '已申请新二维码', 'info'); }
+  catch (e) { banner('申请失败：' + e, 'warn'); }
+  tick();
+};
+
 tick();
-setInterval(() => { if (!done && !busy) tick(); }, 2500);
+// 恢复阶段 1.5s 一次（原来 2.5s 体感慢），其余 2s
+setInterval(() => { if (!done && !busy) tick(); }, 1500);
 </script>
 </body>
 </html>

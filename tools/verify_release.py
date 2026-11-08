@@ -53,6 +53,7 @@ KEY_FILES = (
     "web/login.html", "web/setup.html",
     "lib/index.py", "lib/ai.py", "lib/napcat_setup.py", "lib/classify.py",
     "lib/catalog.py", "lib/vault.py", "lib/vocab.py", "lib/localimport.py", "lib/download.py",
+    "lib/qq.py", "lib/qqlogin.py", "lib/napcat_launch.py",
     "tools/smoke_test.py", "tools/test_v3.py", "tools/setup_napcat.bat",
 )
 API_PATHS = ("/api/health", "/api/state", "/api/tree?dim=subject&node=%5B%5D",
@@ -211,6 +212,9 @@ def main() -> int:
                 check((target / k).is_file(), f"解压结果缺少 {k}")
             check(not any(p.name == "state" and p.is_dir() for p in target.rglob("*")),
                   "发布包里混入了 state/")
+            inst_cfg = json.loads((target / "config.json").read_text(encoding="utf-8"))
+            check(not str(inst_cfg.get("vault") or "").strip(),
+                  f"安装器内 config.json 混入开发机绝对路径：{inst_cfg.get('vault')}")
             cn = [p.name for p in target.rglob("*") if any("\u4e00" <= c <= "\u9fff" for c in p.name)]
             check("新手必读.txt" in cn and "一键登录.bat" in cn, f"中文文件名乱码或缺失：{cn[:8]}")
             print(f"  ✓ 解压 {len(files)} 项，关键文件齐全，中文名正确：{cn[:4]}")
@@ -227,6 +231,13 @@ def main() -> int:
                 check((out / k).is_file(), f"完整包缺少 {k}")
             check(not any(n.startswith("state/") or n.startswith("dist/") for n in names),
                   "完整包混入 state/ 或 dist/")
+            # v3.6.0：发行包不能带开发机绝对路径，否则新人解压后读不到自己的新库
+            pkg_cfg = json.loads((out / "config.json").read_text(encoding="utf-8"))
+            check(not str(pkg_cfg.get("vault") or "").strip(),
+                  f"发行包 config.json 混入开发机绝对路径：{pkg_cfg.get('vault')}")
+            check(str(pkg_cfg.get("vault_name") or "").strip() == "QQ群资料新库",
+                  f"发行包默认新库名异常：{pkg_cfg.get('vault_name')}")
+            print("  ✓ 发行包 config.json 已净化（新人自动在自己桌面建独立新库）")
             r1 = subprocess.run([sys.executable, "-m", "compileall", "-q", str(out)],
                                 capture_output=True, text=True, timeout=180)
             check(r1.returncode == 0, f"完整包 compileall 失败：{r1.stderr[:200]}")
@@ -274,6 +285,13 @@ def main() -> int:
                 body, status = get(p)
                 check(status == 200 and body.get("ok"), f"{p} 返回 {status} / {str(body)[:160]}")
                 print(f"  ✓ {p:52s} ok=true")
+            # v3.6.0：登录状态机与库登记字段必须随发行包一起到位（隔离环境不要求真的在线/已登记）
+            qs, _ = get("/api/qqlogin/status")
+            check(all(k in qs for k in ("account_conflict", "can_recover", "local_uins")),
+                  "解压出的程序缺 v3.6.0 登录冲突识别字段")
+            vs, _ = get("/api/vault/status")
+            check("obsidian_registered" in vs, "解压出的程序缺 v3.6.0 库登记状态字段")
+            print("  ✓ v3.6.0 登录状态机 / 库登记字段齐备")
             for p in STATIC_PATHS:
                 data, status = get(p, json_body=False)
                 check(status == 200 and len(data) > 200, f"静态资源 {p} 异常：{status} / {len(data)} B")

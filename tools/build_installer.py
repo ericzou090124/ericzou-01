@@ -65,13 +65,34 @@ def collect() -> list[Path]:
     return out
 
 
+def package_bytes(p: Path) -> bytes:
+    """打进发行包前净化 config.json：绝不把开发机的绝对路径带给新用户。
+
+    v3.6.0：本机调试时 `config.vault` 会写成 `C:\\Users\\ERICZOU\\Desktop\\...`，
+    新人下载安装包后会去读一个不存在的目录。`vault` 留空时 `config.vault()`
+    会自动在**自己**的桌面建 `vault_name` 同名独立新库，才是可复刻的行为。
+    """
+    if p.name == "config.json" and p.parent == ROOT:
+        import json
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return p.read_bytes()
+        v = cfg.get("vault")
+        if isinstance(v, str) and (re.match(r"^[A-Za-z]:[\\/]", v)
+                                   or v.startswith(("~", "/Users/", "/home/"))):
+            cfg["vault"] = ""
+            return (json.dumps(cfg, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    return p.read_bytes()
+
+
 def build_zip() -> bytes:
     files = collect()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for p in files:
             rel = str(p.relative_to(ROOT)).replace("\\", "/")
-            z.write(p, rel)
+            z.writestr(rel, package_bytes(p))
     return buf.getvalue()
 
 

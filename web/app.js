@@ -54,7 +54,8 @@ async function loadState() {
   const groups = Object.keys(d.source.groups || {});
   const cur = state.group;
   gf.innerHTML = '<option value="">全部群聊</option>' + groups.map(g =>
-    `<option value="${esc(g)}" ${g === cur ? 'selected' : ''}>${esc(g)}</option>`).join('');
+    `<option value="${esc(g)}" ${g === cur ? 'selected' : ''}>${esc(g)}</option>`).join('')
+    + '<option value="__manage__">＋ 读取 / 添加群聊…</option>';
   if (cur && !groups.includes(cur)) { state.group = ''; }
   const bn = $('#sb-napcat');
   if (bn) bn.onclick = async () => {
@@ -280,8 +281,8 @@ async function groupsModal() {
   try { d = await api('/api/groups'); } catch (e) { return toast('获取群列表失败：' + e.message); }
   const all = d.available || [];
   const status = d.online
-    ? `已读取本 QQ 加入的 <b>${d.total_groups || all.length}</b> 个群，勾选要纳入搜索的群聊。`
-    : `QQ 未在线，已列出本机目录里缓存的 <b>${all.length}</b> 个群（同样可框选保存）。扫码登录后点「读取我的 QQ 群」可获得完整群列表。`;
+    ? `已读取本 QQ 加入的 <b>${d.total_groups || all.length}</b> 个群，勾选要纳入搜索的群聊。新人三步：① 点「读取我的 QQ 群」→ ② 勾群 / 搜索 / 全选 → ③「保存选择」后会自动拉取这些群的群文件。`
+    : `QQ 未在线，当前只能列出本机缓存的 <b>${all.length}</b> 个群。<b>新人请先点右上角「去登录 / 换号」完成扫码</b>，回来再点「读取我的 QQ 群」即可拿到你加入的全部群；也可以先在下方手动填群号加入。`;
   const rows = all.length ? all.map(g =>
     `<label class="grow-row gm-row" data-k="${esc((g.name + ' ' + g.group_id).toLowerCase())}" style="cursor:pointer;align-items:center;gap:8px">
        <input type="checkbox" class="gm-chk" data-gid="${esc(g.group_id)}" data-name="${esc(g.name)}" ${g.checked ? 'checked' : ''}>
@@ -293,6 +294,7 @@ async function groupsModal() {
     <div class="row gap" style="margin:10px 0 6px">
       <input id="gm-search" placeholder="搜索群名 / 群号" style="flex:1">
       <button class="btn small" id="gm-reload">读取我的 QQ 群</button>
+      <button class="btn small" id="gm-login">去登录 / 换号</button>
       <button class="btn small" id="gm-all">全选</button>
       <button class="btn small" id="gm-none">全不选</button>
     </div>
@@ -316,6 +318,7 @@ async function groupsModal() {
     const k = (e.target.value || '').trim().toLowerCase();
     $('#dialog').querySelectorAll('.gm-row').forEach(r => { r.style.display = !k || r.dataset.k.includes(k) ? '' : 'none'; });
   };
+  $('#gm-login').onclick = () => { location.href = '/login'; };
   $('#gm-reload').onclick = async () => {
     $('#gm-status').textContent = '正在读取本 QQ 的群列表…';
     try {
@@ -366,12 +369,11 @@ async function groupsModal() {
     const btn = $('#gm-save'); btn.disabled = true; btn.textContent = '保存中…';
     try {
       const r = await api('/api/groups/set', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({groups: picked})});
+        body: JSON.stringify({groups: picked, refresh: true})});
       closeModal();
-      toast(`已保存 ${r.saved} 个群到搜索池，正在刷新分类树…`, 6000);
+      toast(`已保存 ${r.saved} 个群` + (r.refreshed ? `，已拉取这些群的群文件（${(r.refresh && r.refresh.items) || 0} 条）` : '，QQ 在线后点「刷新来源」即可读取群文件'), 7000);
       state.group = ''; state.path = []; state.selected.clear();
       await loadState(); await reload();
-      if (d.online) $('#btn-refresh').click();   // 异步拉取新勾选群的文件
     } catch (e) { btn.disabled = false; btn.textContent = '保存选择'; $('#gm-msg').textContent = '保存失败：' + e.message; }
   };
 }
@@ -401,12 +403,16 @@ async function vaultImportModal() {
   const preview = pending.slice(0, cap);
   let targets = null;
   try { targets = await api('/api/vault/targets'); } catch (_) { /* 目标库只读失败不阻断导入 */ }
+  let localInfo = null;
+  try { localInfo = await api('/api/local/scan'); } catch (_) { /* 离线清单读取失败不阻断导入 */ }
   window.__vaultTargets = targets;
   const opts = (targets?.vaults || []).map(v =>
     `<option value="${esc(v.path)}" ${v.current ? 'selected' : ''}>${esc(v.name)}${v.current ? '（当前库）' : ''} · ${esc(v.path)}</option>`).join('');
   modal(`<div class="dialog-head"><h3>一键批量导入到 Obsidian</h3><span class="link dialog-close" id="vi-close">关闭 ✕</span></div>
     <div class="muted">将按<b>当前筛选范围</b>（${state.path.length ? esc(state.path.join(' › ')) : '全部'}）导入尚未下载的文件，
     单批最多 <b>${cap}</b> 个。导入后自动抽取正文、按原有分类落盘，生成预览笔记、多级大纲与「本次导入报告」。</div>
+    ${localInfo && localInfo.pending ? `<div class="muted" style="margin-top:8px">🔌 QQ 未在线：本机已另存 <b>${localInfo.pending}</b> 份可导入的真实群文件，
+    当前筛选范围里没有对应文件时会自动从这批文件取满一批，不会再出现「报错且一份都没导入」。</div>` : ''}
     <div class="list" style="margin-top:10px">${preview.length ? preview.slice(0, 8).map(x => `<div>· ${esc(x.name)}</div>`).join('') : '<div>当前页没有待下载文件</div>'}${preview.length > 8 ? `<div>… 其余 ${preview.length - 8} 个</div>` : ''}</div>
     <label style="display:block;margin:12px 0 4px">导入到哪个 Obsidian 库</label>
     <select id="vi-target" class="mini" style="width:100%">${opts || '<option value="">当前库</option>'}</select>
@@ -457,7 +463,9 @@ function vaultResultModal(r) {
   modal(`<div class="dialog-head"><h3>导入完成 · 现在就能看到成效</h3><span class="link dialog-close" id="vr-close">关闭 ✕</span></div>
     <div style="line-height:1.9">
       <div>本次成功导入 <b>${r.imported ?? r.succeeded ?? 0}</b> / ${r.attempted ?? 0} 份 · 通道：${esc(r.source || 'QQ 群文件')}</div>
+      <div>导入到库：<b>${esc(v.name || v.path || '')}</b>${v.obsidian_registered === false ? '（⚠ 未登记到 Obsidian，点下方按钮会自动登记）' : '（已在 Obsidian 登记）'}</div>
       <div>本库已入库 <b>${v.downloaded ?? 0}</b> / ${v.total ?? 0} 份 · 笔记 <b>${v.notes ?? 0}</b> 篇 · 大纲 <b>${v.outlines ?? 0}</b> 页</div>
+      ${r.offline_widened ? '<div>ℹ️ 当前筛选范围内没有本机另存的副本，已自动从本机可导入清单取满这一批。</div>' : ''}
       <div>${openTxt}</div>
     </div>
     <h4 style="margin:14px 0 6px">新文件已落在原有分类里</h4>
@@ -616,7 +624,46 @@ $('#btn-ask').onclick = () => ask($('#ask').value);
 $('#ask').onkeydown = (e) => { if (e.key === 'Enter') ask($('#ask').value); };
 $('#btn-settings').onclick = settingsModal;
 $('#btn-groups').onclick = groupsModal;
-$('#group-focus').onchange = () => { state.group = $('#group-focus').value; state.path = []; state.selected.clear(); state.kind = ''; state.kindOptions = []; reload(); };
+$('#btn-reload').onclick = () => location.reload();
+
+// v3.6.0：一键刷新网页 + 退出当前 QQ / 换号重新扫码
+async function switchQQModal() {
+  let uins = [];
+  try { const s = await api('/api/qqlogin/status'); uins = s.local_uins || []; } catch (_) { /* 离线也可换号 */ }
+  const opts = '<option value="">全新扫码（推荐 · 用任意 QQ 扫新码）</option>'
+    + uins.map(u => `<option value="${esc(u)}">快速切换到本机已有账号 ${esc(u)}</option>`).join('');
+  modal(`<div class="dialog-head"><h3>退出当前 QQ · 换号扫码</h3><span class="link dialog-close" id="sq-close">关闭 ✕</span></div>
+    <div class="muted" style="line-height:1.9">这会关闭本机的「自动登录旧账号」，<b>干净重启 NapCat</b>（不继承旧的 -q 参数）并生成全新二维码。<br>
+    如果当前 QQ 正在电脑 QQ 客户端里登录，直接扫码会一直提示「无法重复登录」，换号即可解决。<br>
+    原来的账号凭证不会被删除，之后仍可切回；只操作本机 NapCat，不动 QQ 客户端、不删任何聊天或文件。</div>
+    <label style="display:block;margin:12px 0 4px">切换方式</label>
+    <select id="sq-uin" class="mini" style="width:100%">${opts}</select>
+    <div class="actions"><button class="btn" id="sq-cancel">取消</button>
+    <button class="btn warn" id="sq-ok">退出并重新扫码</button></div>
+    <div class="muted" id="sq-msg" style="margin-top:8px"></div>`);
+  $('#sq-close').onclick = closeModal; $('#sq-cancel').onclick = closeModal;
+  $('#sq-ok').onclick = async () => {
+    const b = $('#sq-ok'); b.disabled = true; b.textContent = '正在退出…';
+    $('#sq-msg').textContent = '正在关闭自动登录、重启 NapCat、申请新二维码（约 10~20 秒）…';
+    try {
+      const r = await api('/api/qqlogin/switch', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({uin: $('#sq-uin').value || ''})});
+      if (!r.ok) throw new Error(r.error || '未知原因');
+      $('#sq-msg').innerHTML = (r.steps || []).map(esc).join('<br>')
+        + '<br><b>即将打开扫码页，请用新 QQ 扫码。</b>';
+      setTimeout(() => { location.href = '/login'; }, 1500);
+    } catch (e) {
+      b.disabled = false; b.textContent = '退出并重新扫码';
+      $('#sq-msg').textContent = '换号失败：' + e.message + '；可点「QQ 登录」页里的按钮重试。';
+    }
+  };
+}
+$('#btn-switch-qq').onclick = switchQQModal;
+$('#group-focus').onchange = () => {
+  const v = $('#group-focus').value;
+  if (v === '__manage__') { $('#group-focus').value = state.group || ''; groupsModal(); return; }
+  state.group = v; state.path = []; state.selected.clear(); state.kind = ''; state.kindOptions = []; reload();
+};
 $('#btn-ask-search').onclick = () => {
   const q = ($('#search').value || '').trim();
   if (!q) return toast('先在搜索框输入查询，再点「问 AI」');

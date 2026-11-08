@@ -640,3 +640,54 @@ Obsidian 插件侧边栏检索增强、下载断点续传、运行日志埋点�
 实测：`obsidian://open` 在本机返回 `opened=True / method=obsidian_uri`；导入 3 份真实文件 → 报告生成、大纲 🆕 3 处、53 篇笔记全部含全文段、单份正文 22684 / 27762 字；新建库成功迁移 50 份资料。
 
 **验证清单**：`smoke_test.py` ALL PASS（新增 [26]~[29]）· `test_v3.py` 66/66 PASS（新增 [H] 段）· 真实 HTTP 闭环（框选加群再恢复、导入 3 份、自动打开）· 前端「所有 `$('#id')` 引用都能在静态/动态 DOM 找到」静态检查无缺失。
+
+---
+
+## v3.6.0：登录冲突、换号、独立新库、全量群聊与离线导入放宽
+
+**用户两组反馈**（截图 + 文字）：① 「这个 QQ 登录总是失效，我明明在手机上同意了但是电脑上还没有登录成功或速度很慢」「导入到 Obsidian 会报错而且没有实际导入」「希望建一个新的 Obsidian 库来为我导入，而不是在我旧有的库内」；② 「还要做可以一键刷新网页的，就是退出登录当前 QQ、换 QQ 重新扫码的按键」「还要做在当前 QQ 内转换群聊的功能，不只是目前的这几个群，一个新人也可以打开 QQ 列表添加群聊来读其中的群文件」。
+
+### 决策 1：先做真机诊断，不猜「登录慢」
+
+拉起 WebUI / OneBot 三层状态后得到关键事实：
+
+- `/api/qqlogin/status`：`is_login=false`、`onebot_online=false`、`webui_online=true`、`napcat_running=true`、`login_error=当前账号(3803328585)已登录,无法重复登录`；
+- `CheckLoginStatus` raw：`loginPhase=waiting_qrcode` 且 `qrcodeurl` 有值 —— **WebUI 在账号已被桌面 QQ 客户端占用的情况下仍持续给出二维码**，用户扫多少次都必然失败，这才是「登录总失效 / 很慢」的真相；
+- 本机一度并存 3 份 NapCat 进程树抢 3000 端口；
+- 前台直接跑 `node.exe index.js -q 3803328585` 复现 `正在快速登录 3803328585 → 当前账号已登录,无法重复登录`；换 `-q 20342423` 则 `登录态已失效，请重新登录` 并正常出全新二维码。
+
+**结论**：不能靠「再刷新一次二维码」解决，必须区分「真没登录」与「账号冲突」，并给换号出口。于是 `qqlogin.status()` 增加 `already_logged_in / account_conflict / need_recover / can_recover / quick_uin / local_uins / recover_hint`，冲突时前端停止渲染废码。`account_conflict` 与 `need_recover` 设计为互斥，避免一边说「扫不了」一边又引导用户「一键恢复」做无用功。
+
+### 决策 2：登录就绪只看 OneBot，不看 WebUI 端口；死码一律不展示
+
+用最终代码重启 8787 做真机终验时又抓到一个同根因的问题：`napcat_running=false / webui_online=false`，但 `/api/qqlogin/status` 仍返回 `qr_source=NapCat 二维码 / qr_age_s=173 / phase_text=等待扫码` —— `_qr_pick()` 在 WebUI 不通时会回退到本机缓存的二维码图，而旧版只按「超过 180 秒」判过期。NapCat 都没在跑，根本没有进程等扫码确认，**这张码扫了手机点同意也毫无反应**，与用户描述的「明明同意了却一直没登录」完全吻合。修为：WebUI 离线时无条件丢弃缓存码（`qr_offline_discarded=true`），登录页写明「已丢弃缓存里的旧二维码」；自测 [30] / `[I]` 都加了「离线且已丢弃时不得再返回 qr_image」的断言。
+
+旧 `napcat_launch.start()` 只要 6099 通就判 `already=True`，重启按钮等于空操作。新增 `onebot_running()`（实调 `/get_login_info`）、`start(force / require_onebot / uin)`、`restart(require_onebot / force)`。`restart()` 只结束 `napcat_runtime\shell_node` 下的 `cmd.exe` / `node.exe`，**绝不动桌面 QQ 客户端**。
+
+另一个隐蔽坑：旧启动用 `DETACHED_PROCESS`（无控制台），而 NapCat 需要自己的控制台打印二维码/日志，结果 `cmd.exe` 活着、`node.exe` 立刻退出。改成 `CREATE_NEW_CONSOLE` + `STARTF_USESHOWWINDOW` + `SW_HIDE`：有控制台但不弹窗打扰用户。
+
+`WebUI /api/QQLogin/RestartNapCat` 会**继承旧 `-q` 参数**，所以 `switch_account()` 不走它，而是清 `SetQuickLoginQQ {"uin":""}` → `napcat_launch.restart(force=True, require_onebot=False)` 干净重启 → 重新申请二维码 → 重置 `_CRED / _ACCOUNTS / _LOGIN / _QR / _LAST_REFRESH / _RECOVER`。真跑 13.9s：`ok=true / need_scan=true / qr_image=true / account_conflict=false / login_error=''`。`local_quick_uins()` 只读 `onebot11_*.json` 文件名与 `Documents/Tencent Files/<QQ号>` 目录名发现本机账号，绝不碰聊天数据或加密库。
+
+### 决策 3：离线导入「0 份」不是没文件，是集合求错了
+
+复现 `QQ 在线下载不可用，且所选范围内没有本机已另存的对应文件`，但 `/api/local/scan` 明明有 60 份可匹配文件。根因：`/api/vault/import` 只把 `catalog.query()` 当前筛选的**前 30 个 id** 与本机文件求交集；本机那 60 份都不在这 30 个 id 里，于是直接报错。
+
+修法不是放开安全闸门，而是**扩大候选集合**：`localimport.available()` 列出所有未入库且能对上目录元数据的真实文件；`pick(..., widen=True, filters=...)` 在交集为空时自动补齐到单批上限。`confirm=true`、白名单目录、文件名精确匹配、扩展名白名单、`max_download_per_batch` 一条没少；只有「用户没显式给 ids」时才允许 widen，避免越权导入。真跑 `imported=30 / offline_widened=true`，前端弹窗与结果卡都如实标注。
+
+### 决策 4：新建库必须写进 Obsidian 注册表
+
+用户明确不要旧库，于是 `set_vault()` 切到桌面上的 `QQ群资料新库`（`migrated=25`，旧库 78 份原文件保持原样）。但只建文件夹还不够：`obsidian://open?vault=<库名>` 是按 `%APPDATA%\obsidian\obsidian.json` 的库名解析的，未登记的新库会打开默认旧库或干脆没反应。新增 `vault.obsidian_registry() / register_vault()`，在 `init()` / `set_vault()` / `open_in_obsidian()` 自动登记；**只追加/更新自己那一条，不删用户其它库**。`vault.status()` 新增 `obsidian_registered`。实测注册表 3 个库并存，新库为默认打开；导入后 55 份原文件 / 55 篇笔记 / 294 页大纲 / 165 处 🆕 / 报告 7830 字节，`obsidian://open` 返回 `opened=true / method=obsidian_uri`。
+
+### 决策 5：泛化到「任意新人 / 任意当前 QQ」
+
+左栏「群聊范围」下拉新增 `＋ 读取 / 添加群聊…` 直达弹窗；弹窗补新人三步说明、「去登录 / 换号」、`读取我的 QQ 群`、搜索、全选/全不选、手动补群号；`/api/groups/set` 保存时带 `refresh:true`，在线即刷新来源与分类树。主页与登录页都加「刷新网页」「换 QQ 扫码」，登录页加恢复卡。前端改动全部走既有 `group-focus → state.group → reload()` 生态，不另起一套状态。
+
+### 自测暴露的一个额外真实缺陷
+
+补 `[27]` 后第一次跑 `smoke_test.py` 报「已导入资料读不到完整正文」。逐份查发现 55 份里有 8 份（图片型 PDF、`.zip`、旧版 `.doc`）本来就没有可抽取文字，而 `vault.content()` 仍返回 `note_text="已读取全文，可交给 AI 概括"` —— 这会让库内 AI 把「无正文」误当成「内容为空」。修为 `body_available=False` + 按格式给原因，笔记「正文全文」段同步写明原文件仍可直接打开；自测改为区分「可抽取 47 份」与「无正文 8 份均如实说明」。这正是坚持「真跑一遍」才抓得到的那类 bug。
+
+### 发行包可复刻性
+
+构建时发现 `config.json` 带着开发机桌面新库的绝对路径，新人下载后会去读一个不存在的目录。新增 `build_installer.package_bytes()`，自解压安装包与完整 zip 共用同一规则：打包时把绝对路径 `vault` 清空、`vault_name` 保留，新用户由 `config.vault()` 自动在**自己**桌面建同名独立新库。同步清掉 `INSTALL.md` 里 v3.1.0 遗留的「分类体系按钮 / 旧三级分类下拉」等已不存在操作的说明。
+
+**验证清单**：`smoke_test.py` ALL PASS（新增 [30]~[33]，本节只读、不触发真实 NapCat 重启或换号）· `test_v3.py` 85/85 PASS（新增 `[I]` 段，不调用 switch / recover / restart、不做真实导入）· 真跑 `/api/qqlogin/switch` 出全新二维码 · 真跑 `/api/vault/import` 30/30 并自动打开报告 · 发行资产与 Release 三件资产 SHA256 逐字节核对。

@@ -355,28 +355,45 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(qqlogin.refresh_qrcode())
             if p == "/api/qqlogin/quick":
                 return self._send(qqlogin.quick_login(str(body.get("uin") or "")))
+            if p == "/api/qqlogin/switch":
+                # 退出当前 QQ / 换号重新扫码（新人也能从这里开始）
+                return self._send(qqlogin.switch_account(str(body.get("uin") or "")))
+            if p == "/api/qqlogin/recover":
+                # v3.6.0：QQ 已登录但 OneBot 3000 没起 —— 自动快速登录 + 必要时重启 NapCat
+                r = qqlogin.recover(str(body.get("uin") or ""))
+                if r.get("ok"):
+                    rr = refresh()
+                    r["refresh"] = {"ok": rr.get("ok"), "mode": rr.get("mode"),
+                                    "items": rr.get("items")}
+                return self._send(r)
             if p == "/api/napcat/start":
                 return self._send(napcat_launch.start())
+            if p == "/api/napcat/restart":
+                return self._send(napcat_launch.restart(str(body.get("uin") or "")))
             if p == "/api/napcat/setup":
                 # 安装自检 + 自动修复本机 NapCat 配置（只改配置，不改 QQ 账号数据）
                 return self._send(napcat_setup.ensure(fix=True, start=False))
             if p == "/api/qqlogin/restore":
-                # 先快速判断 NapCat/OneBot 是否可达：完全没运行时立即给出可操作提示，
-                # 避免轮询 20+ 秒让页面像卡死（这是 v1.2.3 自测发现的真实卡顿）。
-                if not qq.reachable() and not qq.online():
-                    return self._send({"ok": False, "need_start": True,
-                                       "error": "NapCat 未运行：请点本页「刷新二维码」，"
-                                                "程序会自动拉起 NapCat 并生成二维码。"})
-                # 已扫码但 OneBot 3000 一般要几秒才起来：最多等约 8 秒，失败再提示手动刷新
+                # v3.6.0：端口没起时不再直接报错，先尝试「快速登录 + 重启 NapCat」，
+                # 这正是「手机上已同意、电脑上却一直不成功」的真实修复路径。
+                steps: list[str] = []
+                if not qq.online():
+                    rec = qqlogin.recover(str(body.get("uin") or ""))
+                    steps = list(rec.get("steps") or [])
+                    if not rec.get("ok") and not qq.reachable():
+                        return self._send({"ok": False, "need_start": True, "steps": steps,
+                                           "error": "已尝试恢复但群文件接口仍不可用：" +
+                                                    (rec.get("error") or "请点「一键恢复登录」再试一次")})
+                # 已扫码但 OneBot 3000 一般要几秒才起来：最多等约 8 秒
                 for _ in range(6):
                     if qq.online():
                         break
                     time.sleep(1.2)
                 if not qq.online():
-                    return self._send({"ok": False,
-                                       "error": "扫码登录尚未完成或群文件接口（OneBot 3000）还没起来："
-                                                "请先在页面上用手机 QQ 扫码并确认；已确认的话稍等几秒，"
-                                                "或回主界面点「刷新来源」"})
+                    return self._send({"ok": False, "steps": steps,
+                                       "error": "群文件接口（OneBot 3000）还没起来：" +
+                                                ("；".join(steps) if steps else
+                                                 "请确认 QQ 已登录，再点「一键恢复登录」")})
                 r = refresh()
                 return self._send({"ok": bool(r.get("ok")), "mode": r.get("mode"),
                                    "items": r.get("items"), "error": r.get("error") or ""})
@@ -464,6 +481,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "path": str(vault.v()), "vault": vault.status(ensure())})
             if p == "/api/vault/open-obsidian":
                 return self._send(vault.open_in_obsidian(str(body.get("file") or "")))
+            if p == "/api/vault/register":
+                return self._send(vault.register_vault())
             if p == "/api/vault/target":
                 r = vault.set_vault(body.get("target") or {})
                 if r.get("ok") and bool(body.get("open", True)):
@@ -473,7 +492,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 一键批量导入：显式确认 + 当前范围（或指定 ids），复用 download 的全部闸门。
                 # 离线 / QQNT 内核异常时自动改走「本机已另存文件」通道，链路不中断。
                 cat = ensure()
-                ids = [str(i) for i in (body.get("ids") or []) if i]
+                explicit_ids = [str(i) for i in (body.get("ids") or []) if i]
+                ids = list(explicit_ids)
                 if not ids:
                     try:
                         node = json.loads(body.get("node", "[]") or "[]")
@@ -485,26 +505,44 @@ class Handler(BaseHTTPRequestHandler):
                                            kind=body.get("kind") or "", cfg=config.CFG,
                                            group=body.get("group") or "")
                     ids = [x["id"] for x in xs if not x.get("downloaded")][:cap]
+                filters = {"group": body.get("group") or "", "kind": body.get("kind") or ""}
+                # v3.6.0：离线兜底不能只盯着「当前筛选前 30 条」。
+                # 用户点「一键批量导入」时若这 30 条恰好没有本机另存副本，
+                # 旧版会直接报错且一份都不导入；现在自动改从本机可导入清单取满一批。
+                widen = not explicit_ids
                 if SOURCE_STATUS.get("mode") == "snapshot" or not qq.online():
                     pairs = localimport.pick(cat, ids)
+                    widened = False
+                    if not pairs and widen:
+                        pairs = localimport.pick(cat, [], widen=True, filters=filters)
+                        widened = bool(pairs)
                     if not pairs:
+                        n_avail = len(localimport.available(cat))
                         return self._send({"ok": False,
                                            "error": "QQ 在线下载不可用，且所选范围内没有本机已另存的对应文件。"
-                                                    "可点「刷新来源」恢复在线，或把 QQ 群文件另存到"
-                                                    " config.json 的 local_import_dirs 目录后再试。",
+                                                    + (f"（本机共 {n_avail} 份可离线导入文件，但都不在当前筛选范围内；"
+                                                       "清空筛选再导入即可）" if n_avail else
+                                                       "可把 QQ 群文件另存到 config.json 的 local_import_dirs 目录后再试。")
+                                                    + " 也可点「刷新来源」恢复在线。",
+                                           "available_local": n_avail,
                                            "vault": vault.status(cat)})
                     r = localimport.run(cat, pairs, bool(body.get("confirm")))
                     r["source"] = "local_saved_file"
+                    r["offline_widened"] = widened
+                    r["available_local"] = len(localimport.available(cat))
                 else:
                     r = download.run(cat, ids, "selection", bool(body.get("confirm")), "", "")
                     # 在线但直链内核异常时，同样用本地已另存文件兜底，不让链路断在这一步
                     if not r.get("ok"):
                         pairs = localimport.pick(cat, ids)
+                        if not pairs and widen:
+                            pairs = localimport.pick(cat, [], widen=True, filters=filters)
                         if pairs:
                             local_r = localimport.run(cat, pairs, bool(body.get("confirm")))
                             if local_r.get("ok"):
                                 local_r["source"] = "local_saved_file_fallback"
                                 local_r["online_error"] = r.get("error") or ""
+                                local_r["offline_widened"] = bool(pairs) and not explicit_ids
                                 r = local_r
                 if r.get("ok"):
                     src = ("本机已另存群文件" if str(r.get("source", "")).startswith("local")
