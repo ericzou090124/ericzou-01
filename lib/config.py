@@ -138,6 +138,38 @@ def remove_qq_group(code: str) -> dict:
     return dict(groups)
 
 
+def set_qq_groups(selected: list[dict]) -> dict:
+    """v3.5.0 群聊框选：一次保存用户勾选的全部群，供任意 QQ 账号使用。
+
+    - 只接受纯数字群号；重复群号去重；
+    - 已在配置里的群保留原代号（分类树/快照里的 group 名不因保存而漂移）；
+    - 新勾选的群自动分配 gN 代号；
+    - 未勾选的群从搜索池移除（不动任何已入库文件）。
+    """
+    old = _qq_groups()
+    by_gid = {str(v.get("qq_group", "")): (k, v) for k, v in old.items()}
+    cleaned: dict[str, dict] = {}
+    used: set[str] = set()
+    for g in selected or []:
+        gid = str((g or {}).get("qq_group", "")).strip()
+        if not gid.isdigit() or gid in used:
+            continue
+        used.add(gid)
+        name = str((g or {}).get("display", "") or "").strip()
+        if gid in by_gid:
+            code, prev = by_gid[gid]
+            cleaned[code] = {"display": name or prev.get("display") or f"群{gid}", "qq_group": gid}
+        else:
+            i = 1
+            while f"g{i}" in cleaned:
+                i += 1
+            cleaned[f"g{i}"] = {"display": name or f"群{gid}", "qq_group": gid}
+    old.clear()
+    old.update(cleaned)
+    write_json(CONFIG_PATH, CFG)
+    return dict(cleaned)
+
+
 def setup_done() -> bool:
     return state("setup_done.json").is_file()
 

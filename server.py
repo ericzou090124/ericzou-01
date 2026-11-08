@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (ai, catalog, config, config_validate, download, index, llm, localimport,  # noqa: E402
-                 napcat_launch, napcat_setup, qq, qqlogin, vault)
+                 napcat_launch, napcat_setup, qq, qqlogin, vault, vocab)
 
 CAT = None
 SOURCE_STATUS = {"mode": "init", "online": False, "updated_at": "", "groups": {}, "errors": []}
@@ -38,6 +38,40 @@ def setup_status() -> dict:
     return {"ok": True, "done": config.setup_done(), "demo": demo,
             "groups": [{"key": k, **v} for k, v in cfg.items()],
             "napcat": napcat_setup.status()}
+
+
+def after_import(cat: dict, r: dict, body: dict, source: str = "QQ 群文件") -> dict:
+    """v3.5.0 导入收尾：让成效**立刻可见**。
+
+    1. 记录本次新增 id，重建大纲（🆕 标记落在原有分类里）；
+    2. 重新部署最新版 AI 插件；
+    3. 生成/刷新「00-本次导入.md」报告；
+    4. 用 obsidian:// 自动打开本库并定位到报告（可在弹窗里取消）。
+    """
+    results = r.get("results") or []
+    changed = [str(x.get("id")) for x in results if x.get("ok")]
+    breakdown: dict[str, int] = {}
+    for iid in changed:
+        x = catalog.by_id(cat, iid)
+        if x:
+            key = str(x.get("subject") or "综合")
+            breakdown[key] = breakdown.get(key, 0) + 1
+    r["imported"] = len(changed)
+    r["breakdown"] = breakdown
+    vault.deploy_plugin()
+    r["notes_refreshed"] = vault.refresh_notes(cat)  # 全部已导入笔记补齐完整正文
+    if changed:
+        vault.mark_recent(changed)
+    r["outlines"] = vault.build_outlines(cat)
+    r["report"] = vault.write_import_report(cat, results, {"source": source})
+    r["vault"] = vault.status(cat)
+    r["counts"] = catalog.counts(cat)
+    cfg_open = (config.CFG.get("obsidian") or {}).get("open_after_import", True)
+    want = bool(body.get("open_after", True)) and cfg_open and bool(changed)
+    r["open"] = (vault.open_in_obsidian(r["report"]) if want else
+                 {"ok": True, "opened": False, "method": "skipped", "path": str(vault.v())})
+    r["opened"] = bool(r["open"].get("opened"))
+    return r
 
 
 def refresh(force_snapshot: bool = False) -> dict:
@@ -151,24 +185,47 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/setup":
                 return self._send(setup_status())
             if p == "/api/qq/groups":
-                return self._send({"ok": True, "groups": qq.list_groups()})
+                gs, err = qq.list_groups()
+                return self._send({"ok": True, "groups": gs, "error": err})
             if p == "/api/groups":
-                # 群聊管理：返回已纳入搜索池的群 + 本 QQ 加入的可添加群（需在线）
+                # v3.5.0 群聊框选：在线读取本 QQ 的**全部**群；离线也能从本机目录
+                # 元数据（含真实群号）列出已有群，保证任何账号、任何网络状态都可框选。
                 groups_cfg = (config.CFG.get("sources", {}).get("qq", {}) or {}).get("groups", {})
                 st_groups = (SOURCE_STATUS.get("groups") or {})
                 configured = [{"code": c, "display": g.get("display", ""), "qq_group": g.get("qq_group", ""),
                                "files": (st_groups.get(g.get("display", ""), {}) or {}).get("files")}
                               for c, g in groups_cfg.items()]
-                available, on = [], qq.online()
-                if on:
-                    try:
-                        available = [{"group_id": g["group_id"], "name": g.get("name", ""),
-                                      "configured": any(str(v.get("qq_group", "")) == str(g["group_id"])
-                                                       for v in groups_cfg.values())}
-                                     for g in qq.list_groups()]
-                    except Exception:
-                        available = []
-                return self._send({"ok": True, "online": on, "configured": configured, "available": available})
+                on = qq.online()
+                live, err = qq.list_groups() if on else ([], "QQ 未在线，以下为本机已缓存的群清单")
+                cfg_gids = {str(v.get("qq_group", "")) for v in groups_cfg.values()}
+                merged: dict[str, dict] = {}
+                for g in live:
+                    merged[g["group_id"]] = {
+                        "group_id": g["group_id"], "name": g.get("name", ""),
+                        "member_count": g.get("member_count", 0), "files": 0,
+                        "configured": g["group_id"] in cfg_gids, "from": "qq", "checked": g["group_id"] in cfg_gids,
+                    }
+                for x in catalog.items(ensure()):
+                    name = str(x.get("group", "") or "").strip()
+                    gid = str(x.get("group_id", "") or "").strip()
+                    if not name or not gid.isdigit():
+                        continue
+                    e = merged.setdefault(gid, {
+                        "group_id": gid, "name": name, "member_count": 0, "files": 0,
+                        "configured": gid in cfg_gids, "from": "catalog", "checked": gid in cfg_gids,
+                    })
+                    e["files"] += 1
+                for c, g in groups_cfg.items():
+                    gid = str(g.get("qq_group", "")).strip()
+                    if gid and gid not in merged:
+                        merged[gid] = {"group_id": gid, "name": g.get("display", "") or f"群{gid}",
+                                       "member_count": 0, "files": 0, "configured": True,
+                                       "from": "config", "checked": True}
+                available = sorted(merged.values(), key=lambda d: (-d["checked"], -d["files"], d["name"]))
+                return self._send({"ok": True, "online": on, "error": err,
+                                   "configured": configured, "available": available,
+                                   "total_groups": len(available),
+                                   "mode": SOURCE_STATUS.get("mode")})
             if p in ("/app.js", "/style.css"):
                 return self._file(p.lstrip("/"))
             if p == "/api/qqlogin/status":
@@ -235,10 +292,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(r)
             if p == "/api/vault/status":
                 return self._send(vault.status(ensure()))
+            if p == "/api/vault/targets":
+                return self._send({"ok": True, "current": str(vault.v()),
+                                   "vaults": vault.discover_vaults(),
+                                   "vault": vault.status(ensure())})
+            if p == "/api/vault/content":
+                return self._send(vault.content(q.get("id", [""])[0], ensure()))
             if p == "/api/vault/search":
                 return self._send(vault.search(q.get("q", [""])[0], ensure(),
                                                group=q.get("group", [""])[0],
-                                               limit=int(q.get("limit", ["20"])[0])))
+                                               limit=int(q.get("limit", ["20"])[0]),
+                                               scope=q.get("scope", ["vault"])[0]))
             if p == "/api/local/scan":
                 # 只读盘点：本机已另存的 QQ 群文件中有多少能与目录元数据精确对上
                 return self._send(localimport.scan(ensure()))
@@ -276,6 +340,17 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/groups/remove":
                 groups = config.remove_qq_group(str(body.get("code") or ""))
                 return self._send({"ok": True, "groups": groups})
+            if p == "/api/groups/set":
+                # 群聊框选：一次保存用户勾选的全部群（任意 QQ 账号通用）
+                groups = config.set_qq_groups(body.get("groups") or [])
+                vocab.invalidate()
+                refreshed = None
+                if bool(body.get("refresh")) and qq.online():
+                    refreshed = refresh()
+                return self._send({"ok": True, "groups": groups, "saved": len(groups),
+                                   "refreshed": bool(refreshed and refreshed.get("ok")),
+                                   "refresh": refreshed or {},
+                                   "vault": vault.status(ensure())})
             if p == "/api/qqlogin/refresh":
                 return self._send(qqlogin.refresh_qrcode())
             if p == "/api/qqlogin/quick":
@@ -317,7 +392,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send({"ok": False, "error": chk["error"]})
                 r = download.run(cat, body.get("ids") or [], body.get("scope", "selection"),
                                  bool(body.get("confirm")), body.get("confirmText", ""), body.get("nodeName", ""))
-                r["counts"] = catalog.counts(cat)
+                if r.get("ok"):
+                    r = after_import(cat, r, body, "QQ 群文件在线下载")
+                else:
+                    r["counts"] = catalog.counts(cat)
                 return self._send(r)
             if p == "/api/ask":
                 r = ai.answer(body.get("q", ""), ensure(), fast=bool(body.get("fast")),
@@ -368,9 +446,11 @@ class Handler(BaseHTTPRequestHandler):
                                    "vault": vault.status(ensure())})
             if p == "/api/vault/init":
                 created = vault.init()
-                return self._send({"ok": True, "created": created,
-                                   "outlines": vault.build_outlines(ensure()),
-                                   "vault": vault.status(ensure())})
+                cat = ensure()
+                notes = vault.refresh_notes(cat)  # 旧版笔记也补齐完整正文
+                return self._send({"ok": True, "created": created, "notes_refreshed": notes,
+                                   "outlines": vault.build_outlines(cat),
+                                   "vault": vault.status(cat)})
             if p == "/api/vault/open":
                 # 在本机文件管理器里打开新库文件夹；失败只回传路径，不报错
                 opened, err = False, ""
@@ -382,6 +462,13 @@ class Handler(BaseHTTPRequestHandler):
                     err = str(e)[:120]
                 return self._send({"ok": True, "opened": opened, "error": err,
                                    "path": str(vault.v()), "vault": vault.status(ensure())})
+            if p == "/api/vault/open-obsidian":
+                return self._send(vault.open_in_obsidian(str(body.get("file") or "")))
+            if p == "/api/vault/target":
+                r = vault.set_vault(body.get("target") or {})
+                if r.get("ok") and bool(body.get("open", True)):
+                    r["open"] = vault.open_in_obsidian("00-使用说明.md")
+                return self._send(r)
             if p == "/api/vault/import":
                 # 一键批量导入：显式确认 + 当前范围（或指定 ids），复用 download 的全部闸门。
                 # 离线 / QQNT 内核异常时自动改走「本机已另存文件」通道，链路不中断。
@@ -419,14 +506,21 @@ class Handler(BaseHTTPRequestHandler):
                                 local_r["source"] = "local_saved_file_fallback"
                                 local_r["online_error"] = r.get("error") or ""
                                 r = local_r
-                r["vault"] = vault.status(cat)
-                r["counts"] = catalog.counts(cat)
+                if r.get("ok"):
+                    src = ("本机已另存群文件" if str(r.get("source", "")).startswith("local")
+                           else "QQ 群文件在线下载")
+                    r = after_import(cat, r, body, src)
+                else:
+                    r["vault"] = vault.status(cat)
+                    r["counts"] = catalog.counts(cat)
                 return self._send(r)
             if p == "/api/vault/import-local":
                 # 显式离线导入：按界面给出的 (id, path) 清单导入本机已另存的 QQ 群文件
                 cat = ensure()
                 r = localimport.run(cat, body.get("pairs") or [], bool(body.get("confirm")))
                 r["counts"] = catalog.counts(cat)
+                if r.get("ok"):
+                    r = after_import(cat, r, body, "本机已另存群文件")
                 return self._send(r)
             if p == "/api/setup/config":
                 saved = config.save_qq_groups(body.get("groups") or [])

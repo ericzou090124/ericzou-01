@@ -40,7 +40,7 @@ REQUIRED_IN_ZIP = (
     "tools/setup_napcat.py", "tools/setup_napcat.bat", "tools/reclassify.py",
     "web/index.html", "web/app.js", "web/login.html", "web/setup.html",
     "lib/index.py", "lib/napcat_setup.py", "lib/classify.py", "lib/catalog.py",
-    "lib/vault.py", "lib/localimport.py", "lib/ai.py", "lib/download.py",
+    "lib/vault.py", "lib/localimport.py", "lib/ai.py", "lib/vocab.py", "lib/download.py",
     "START_HERE.txt", "VERSION.txt", INSTALLER_NAME,
 )
 
@@ -59,14 +59,18 @@ START_HERE = """资源管理 · 从这里开始（START HERE）
        会自动启动本地服务，并打开浏览器到 http://127.0.0.1:8787
        第一次使用：install.bat 会自动检测并修好 NapCat 配置；点顶部「QQ 登录」
        在页面上直接扫码（不用打开任何 NapCat 控制台），再用顶栏「群聊」按钮
-       增删 / 确认要搜索的 QQ 群，点「刷新来源」即可；不用手改任何配置文件。
+       「读取我的 QQ 群」：会列出本 QQ 加入的全部群，可搜索、全选、批量框选保存，
+       然后点「刷新来源」即可；不用手改任何配置文件。没登录也能框选本机缓存的群。
 
   3) 主页「Obsidian 知识库」卡片就是完整链路：
        ① 左侧「分类整理」按学科 / 类型 / 来源逐级下钻（计数严格一致、无空分类）
-       ② 点「一键批量导入到 Obsidian」并勾选确认
-       ③ 自动抽取正文、按「来源/群聊/领域/学科/类型」分类入库，生成预览笔记与多级大纲
-       ④ 点「打开库文件夹」在 Obsidian 里打开新库，用「库内 AI 检索」或右侧栏 AI 搜索提问
+       ② 点「一键批量导入到 Obsidian」：可选已有库 / 新建库，勾选确认
+       ③ 自动抽取正文、按「来源/群聊/领域/学科/类型」分类入库，生成含完整正文的
+          预览笔记与多级大纲，新导入文件在原有分类里带 🆕 标记
+       ④ 导入完成会自动打开 Obsidian 并定位「00-本次导入.md」报告；网页也弹出成效卡
        新库默认在 桌面\\QQ群资料Obsidian库，是独立新库，不覆盖你原有的笔记库。
+       也可在导入弹窗 /「挑选 / 新建库」里选本机已有库（保留其原有设置，只追加插件）。
+       库内 AI 可检索全部资料并「读取全文」；AI 问答对任意学科都自动召回，不只擅长四六级。
        QQ 群文件直链不可用时，会自动改从本机已另存的群文件导入，链路不中断。
 
 【只想一键装好？】

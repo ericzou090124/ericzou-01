@@ -9,6 +9,7 @@
   E. 老端点回归（health / tree / files / settings / outline）
   F. 群聊管理（增减群 + 群筛选）
   G. v3.4.0：主页 Obsidian 完整链路、库状态 / 库内检索、离线导入闸门、四六级与 CET 精准召回
+  H. v3.5.0：AI 语料自适应泛化、全量群聊框选、导入后报告/🆕/自动打开、库内 AI 全文读取
 
 不调用 server.main()，避免刷新来源时产生网络请求 / 写盘副作用；
 真实 catalog.json 只读，任何会写盘的操作都用 mock 或显式恢复。
@@ -264,6 +265,55 @@ def main() -> int:
         check("AI 精准召回 CET6 不混入 CET4",
               cet6.get("found") is True and n6 and all("CET6" in n.upper() for n in n6[:5]),
               f"{n6[:3]}")
+
+        print("\n[H] v3.5.0 AI 泛化 / 全量群框选 / 导入后成效 / 库内全文")
+        for token in ("在 Obsidian 打开", "挑选 / 新建库", "🆕"):
+            check("主页链路含「" + token + "」", token in home, "")
+
+        tg = get("/api/vault/targets")[2]
+        check("/api/vault/targets 能列出已有库与当前库",
+              tg.get("ok") and isinstance(tg.get("vaults"), list)
+              and any(v.get("current") for v in tg["vaults"]),
+              f"vaults={len(tg.get('vaults', []))}")
+
+        st = get("/api/state")[2].get("counts", {}).get("total", 0)
+        allq = get("/api/vault/search?q=" + urllib.parse.quote("罗尔") + "&scope=all&limit=5")[2]
+        check("库内 AI scope=all 覆盖全部目录资料",
+              allq.get("ok") and allq.get("scanned") == st and st > 0,
+              f"scanned={allq.get('scanned')} total={st}")
+
+        files = get("/api/files?dim=subject&node=%5B%5D&limit=500")[2].get("items", [])
+        dl = next((x for x in files if x.get("downloaded")), None)
+        if dl:
+            ct = get("/api/vault/content?id=" + urllib.parse.quote(dl["id"]))[2]
+            check("库内 AI 可读取已导入资料的完整正文",
+                  ct.get("ok") and ct.get("body_chars", 0) > 0,
+                  f"{str(dl.get('name', ''))[:18]} body_chars={ct.get('body_chars')}")
+        else:
+            check("库内 AI 可读取已导入资料的完整正文", False, "没有已导入条目")
+
+        gr = get("/api/groups")[2]
+        check("群聊框选可给出全部候选群（不只已配置的 3 个）",
+              gr.get("ok") and len(gr.get("available", [])) >= len(gr.get("configured", [])),
+              f"available={len(gr.get('available', []))} configured={len(gr.get('configured', []))}"
+              f" online={gr.get('online')}")
+
+        luo = post("/api/ask", {"q": "罗尔拉格朗日柯西中值定理", "fast": True})
+        check("AI 泛化：未硬编码的专业术语也能大量召回",
+              luo.get("found") is True and luo.get("total_matched", 0) >= 10,
+              f"total_matched={luo.get('total_matched')} sources={len(luo.get('sources', []))}")
+
+        vs2 = get("/api/vault/status")[2]
+        check("库状态含导入报告 / 🆕 / 自动打开字段",
+              all(k in vs2 for k in ("report", "report_exists", "recent", "obsidian_auto_open")), "")
+        if vs2.get("recent", 0) > 0:
+            outline = (config.vault() / "00-多级大纲.md").read_text(encoding="utf-8")
+            check("新导入文件在原有分类大纲里带 🆕 标记", "🆕" in outline,
+                  f"mark={outline.count('🆕')}")
+            check("导入报告已生成", (config.vault() / vs2["report"]).is_file(), "")
+        manifest = json.loads((config.PLUGIN_SRC / "manifest.json").read_text(encoding="utf-8"))
+        check("Obsidian AI 插件已升级到 1.2.0", manifest.get("version") == "1.2.0",
+              f"version={manifest.get('version')}")
 
     finally:
         srv.shutdown()

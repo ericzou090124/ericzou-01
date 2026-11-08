@@ -18,6 +18,8 @@
 - NapCat 自检 / QQ 登录页结构（无微信 / 无分类体系入口）
 - v3.4.0：四六级真题 AI 召回与 CET6/CET4 精准隔离、CET 分类、FTS 缓存连接不误关、
   新库状态 / 库内检索、离线导入三道闸门（空清单 / 未确认 / 越界路径）
+- v3.5.0：语料自适应词典泛化（简称/共现/无特化词表）、库内 AI 读取全部目录与完整正文、
+  本机已有 Obsidian 库发现、群聊框选批量保存且代号不漂移
 """
 import os
 import sqlite3
@@ -501,6 +503,62 @@ def main():
         fail("[25] 离线导入放行了白名单之外的路径")
     print(f"[25] 离线导入闸门 OK：白名单目录 {len(_sc['dirs'])} 个、"
           f"可匹配 {_sc['matched']} 份；空清单 / 未确认 / 越界路径均拒绝")
+
+    # ---- v3.5.0：AI 泛化 / 库内全文 / 已有库发现 / 群聊框选 ----
+    import copy as _copy2
+    from lib import vocab as _vocab
+    _core, _extra = _vocab.get(cat).expand("线代")
+    if "线性代数" not in (_core + _extra):
+        fail("[26] 语料词典未自动学到「线代 → 线性代数」这类简称")
+    _luo = ai.answer("罗尔拉格朗日柯西中值定理", cat, fast=True)
+    _ma = ai.answer("马原考试回忆版", cat, fast=True)
+    if not _luo["found"] or _luo.get("total_matched", 0) < 10:
+        fail(f"[26] 未硬编码的专业术语召回不足：{_luo.get('total_matched')}")
+    if not _ma["found"]:
+        fail("[26] 「马原」被误判为没有（旧版 jieba 切单字导致）")
+    # 删掉手工四六级词表，专业主题仍必须能召回（泛化不靠特化词表）
+    _saved_search = _copy2.deepcopy(config.CFG.get("search"))
+    config.CFG["search"] = {"phrase_expansions": {}, "find_intent": ["有哪些", "找一套"]}
+    try:
+        _nohard = ai.answer("线代期中真题有哪些", cat, fast=True)
+    finally:
+        config.CFG["search"] = _saved_search
+    if not _nohard["found"]:
+        fail("[26] 移除手工别名词表后普通主题失效（泛化仍依赖硬编码）")
+    print(f"[26] AI 泛化 OK：罗尔 {_luo.get('total_matched')} 份 / 马原 {_ma.get('total_matched')} 份 /"
+          f" 线代→线性代数 自动扩展 / 无特化词表仍命中")
+
+    _allq = _vault.search("罗尔", cat, scope="all", limit=5)
+    if _allq.get("scanned") != len(catalog.items(cat)):
+        fail(f"[27] scope=all 未覆盖全目录：{_allq.get('scanned')}")
+    _dl = [x for x in catalog.items(cat) if x.get("downloaded")]
+    if _dl:
+        _ct = _vault.content(_dl[0]["id"], cat)
+        if not _ct.get("ok") or _ct.get("body_chars", 0) <= 0:
+            fail("[27] 已导入资料读不到完整正文")
+        _note_path = config.vault() / _dl[0]["note"]
+        if _note_path.is_file() and "## 正文全文" not in _note_path.read_text(encoding="utf-8"):
+            fail("[27] 笔记未写入完整正文（Obsidian 全局搜索会漏内容）")
+    print(f"[27] 库内 AI 全文 OK：scope=all 覆盖 {_allq['scanned']} 份；"
+          f"单份正文 {_ct.get('body_chars', 0) if _dl else 0} 字；笔记含全文段")
+
+    _tv = _vault.discover_vaults()
+    if not _tv or not any(d.get("current") for d in _tv):
+        fail("[28] 本机已有 Obsidian 库发现异常（无法挑选已有库）")
+    for _k in ("report", "report_exists", "recent", "obsidian_auto_open"):
+        if _k not in _vs:
+            fail(f"[28] vault.status 缺 v3.5.0 字段 {_k}")
+    print(f"[28] 目标库 OK：发现 {len(_tv)} 个本机库，当前库 {config.vault_name()}；"
+          f"状态字段齐全")
+
+    _saved_groups = _copy2.deepcopy(config.CFG["sources"]["qq"]["groups"])
+    _sel = [{"qq_group": g["qq_group"], "display": g["display"]} for g in _saved_groups.values()]
+    _set = config.set_qq_groups(_sel)
+    if len(_set) != len(_saved_groups) or set(_set) != set(_saved_groups):
+        fail("[29] 群聊框选保存未保留原有群代号")
+    config.CFG["sources"]["qq"]["groups"] = _saved_groups
+    config.write_json(config.CONFIG_PATH, config.CFG)
+    print(f"[29] 群聊框选 OK：{len(_set)} 个群批量保存且代号不变（配置已还原）")
 
     # 最小 LLM 调用（可选）：配置存在则跑，缺失则跳过
     try:

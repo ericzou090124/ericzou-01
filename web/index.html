@@ -32,18 +32,20 @@
     <span class="vs-step"><i>1</i>分类整理</span><span class="vs-arrow">→</span>
     <span class="vs-step"><i>2</i>一键批量导入</span><span class="vs-arrow">→</span>
     <span class="vs-step"><i>3</i>自动分类入库</span><span class="vs-arrow">→</span>
-    <span class="vs-step"><i>4</i>Obsidian 打开 + AI 检索</span>
+    <button id="btn-vault-obsidian" class="vs-step vs-step-btn" title="立即在 Obsidian 打开本库"><i>4</i>Obsidian 打开 + AI 检索</button>
   </div>
   <div class="vs-foot">
     <div class="vs-stat" id="vault-stat">正在读取库状态…</div>
     <div class="row gap">
       <button id="btn-vault-import" class="btn small primary">一键批量导入到 Obsidian</button>
+      <button id="btn-vault-obsidian2" class="btn small">在 Obsidian 打开</button>
+      <button id="btn-vault-target" class="btn small">挑选 / 新建库</button>
       <button id="btn-vault-search" class="btn small">库内 AI 检索</button>
       <button id="btn-vault-open" class="btn small">打开库文件夹</button>
       <button id="btn-vault-init" class="btn small">初始化 / 重建大纲</button>
     </div>
   </div>
-  <div class="vs-note" id="vault-note">下载后自动抽取正文、生成摘要，并按「来源 / 群聊 / 领域 / 学科 / 类型」落盘，同时生成预览笔记与多级大纲。</div>
+  <div class="vs-note" id="vault-note">导入完成后会自动打开 Obsidian 并显示「本次导入报告」：新文件在原有分类里带 🆕 标记，正文全文写入笔记，库内 AI 可读取全部已导入内容。</div>
 </section>
 
 <div class="layout">

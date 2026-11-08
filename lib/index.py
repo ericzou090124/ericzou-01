@@ -159,6 +159,12 @@ def query_terms(q: str, max_terms: int = 24) -> list[str]:
         if not terms:
             for seg in CJK.findall(q or ""):
                 terms.extend(seg[i:i + 3] for i in range(max(1, len(seg) - 2)))
+    # v3.5.0：短专业词兜底。jieba 会把「马原」「线代」这类 2 字术语切成单字被过滤，
+    # 结果整句没有可用检索词 → AI 误报「没有」。保留原始 2~6 字 CJK 串作为候选。
+    if not any(re.fullmatch(r"[\u4e00-\u9fff]{2,}", t) for t in terms):
+        for seg in CJK.findall(cleaned):
+            if 2 <= len(seg) <= 6:
+                terms.append(seg)
     seen, out = set(), []
     for t in terms:
         if t not in seen:
@@ -242,9 +248,16 @@ def sync(cat: dict) -> int:
         con.close()
 
 
-def search(q: str, limit: int = 20) -> list[dict]:
-    terms = query_terms(q)
-    expr = _match_expr(terms)
+def search(q: str, limit: int = 20, extra: list[str] | None = None) -> list[dict]:
+    """FTS 检索。extra 为上层（语料词典/别名）算出的扩展词，一并参与 OR 匹配。"""
+    terms = list(query_terms(q))
+    seen = set(terms)
+    for t in (extra or []):
+        t = str(t).strip().lower()
+        if len(t) >= 2 and t not in seen:
+            seen.add(t)
+            terms.append(t)
+    expr = _match_expr(terms[:48])
     con = connect()
     try:
         rows = []

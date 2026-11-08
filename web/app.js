@@ -208,8 +208,9 @@ async function confirmDownload(ids, scope, nodeName, singleName) {
       closeModal();
       toast(`完成 ${r.succeeded}/${r.attempted} 个${r.skipped_over_cap ? `，另有 ${r.skipped_over_cap} 个超出单批上限` : ''}${r.error ? ' · ' + r.error : ''}`, 7000);
       state.selected.clear();
-      await loadState(); await reload();
+      await loadState(); await reload(); await loadVault();
       if (state.preview && ids.includes(state.preview.id)) showPreview(state.preview.id);
+      if (r.imported) vaultResultModal(r);
     } catch (e) { btn.disabled = false; btn.textContent = '确认下载'; toast('下载失败：' + e.message, 7000); }
   };
   if (second) $('#cf').focus();
@@ -218,7 +219,7 @@ async function confirmDownload(ids, scope, nodeName, singleName) {
 function addMsg(role, text, sources) {
   const el = document.createElement('div');
   el.className = 'msg' + (role === 'me' ? ' me' : '');
-  el.innerHTML = esc(text) + (sources && sources.length ? `<div class="srcs"><b>源文件索引</b>` +
+  el.innerHTML = esc(text) + (sources && sources.length ? `<div class="srcs"><b>源文件索引 · ${sources.length} 条</b>` +
     sources.map(s => `<div class="srcitem" data-id="${esc(s.id)}">↳ ${esc(s.name)} · ${s.downloaded ? '已下载' : '仅元数据'}</div>`).join('') + '</div>' : '');
   $('#chat').appendChild(el);
   $('#chat').scrollTop = $('#chat').scrollHeight;
@@ -234,7 +235,8 @@ async function ask(q) {
     const scope = JSON.stringify(state.path);
     const d = await api(`/api/ask?q=${encodeURIComponent(q)}&fast=${$('#fast').checked ? 1 : 0}&scope=${encodeURIComponent(scope)}&group=${encodeURIComponent(state.group || '')}&dim=${encodeURIComponent(state.dim || 'subject')}`);
     const scopeTxt = d.scope && Object.keys(d.scope).length ? ' · 范围 ' + Object.values(d.scope).join('›') : '';
-    el.remove(); addMsg('ai', d.answer + `\n\n[${d.mode} · ${d.took_ms} ms${d.found ? '' : ' · 未命中'}${scopeTxt} ]`, d.sources);
+    const matchedTxt = d.total_matched ? ` · 共命中 ${d.total_matched} 份` : '';
+    el.remove(); addMsg('ai', d.answer + `\n\n[${d.mode} · ${d.took_ms} ms${d.found ? '' : ' · 未命中'}${matchedTxt}${scopeTxt} ]`, d.sources);
   } catch (e) { el.remove(); addMsg('ai', '请求失败：' + e.message); }
 }
 
@@ -272,61 +274,105 @@ function settingsModal() {
   });
 }
 
+// v3.5.0 群聊框选：读取本 QQ 全部群（离线则读本机目录里的真实群号），多选保存
 async function groupsModal() {
   let d;
   try { d = await api('/api/groups'); } catch (e) { return toast('获取群列表失败：' + e.message); }
-  const cfg = d.configured || [];
-  const avail = (d.available || []).filter(g => !g.configured);
-  const cfgHtml = cfg.length ? cfg.map(g =>
-    `<div class="grow-row"><span>${esc(g.display)} <span class="muted">${esc(g.qq_group)}${g.files != null ? ' · ' + g.files + ' 份' : ''}</span></span>
-     <button class="btn small warn" data-remove="${esc(g.code)}">移除</button></div>`).join('')
-    : '<div class="muted">尚未配置任何群</div>';
-  const availHtml = avail.length ? avail.map(g =>
-    `<div class="grow-row"><span>${esc(g.name)} <span class="muted">${esc(g.group_id)}</span></span>
-     <button class="btn small primary" data-add-gid="${esc(g.group_id)}" data-add-name="${esc(g.name)}">添加</button></div>`).join('')
-    : (d.online ? '<div class="muted">本 QQ 加入的其它群为空</div>'
-                : '<div class="muted">QQ 未在线，无法列出可添加群；请先扫码登录，或手动填入群号添加。</div>');
-  modal(`<div class="dialog-head"><h3>群聊管理</h3><span class="link dialog-close" id="gm-close">关闭 ✕</span></div>
-    <div class="muted">这里管理「搜索群文件」的群聊范围。新增的群会在下次「刷新来源」（需 QQ 在线）时拉取文件；移除的群会在在线刷新时从索引清理。</div>
-    <h4 style="margin:14px 0 6px">已纳入搜索池（${cfg.length}）</h4>
-    <div class="grow-list">${cfgHtml}</div>
-    <h4 style="margin:14px 0 6px">可添加（本 QQ 加入的群）</h4>
-    <div class="grow-list">${availHtml}</div>
-    <h4 style="margin:14px 0 6px">手动添加群号</h4>
+  const all = d.available || [];
+  const status = d.online
+    ? `已读取本 QQ 加入的 <b>${d.total_groups || all.length}</b> 个群，勾选要纳入搜索的群聊。`
+    : `QQ 未在线，已列出本机目录里缓存的 <b>${all.length}</b> 个群（同样可框选保存）。扫码登录后点「读取我的 QQ 群」可获得完整群列表。`;
+  const rows = all.length ? all.map(g =>
+    `<label class="grow-row gm-row" data-k="${esc((g.name + ' ' + g.group_id).toLowerCase())}" style="cursor:pointer;align-items:center;gap:8px">
+       <input type="checkbox" class="gm-chk" data-gid="${esc(g.group_id)}" data-name="${esc(g.name)}" ${g.checked ? 'checked' : ''}>
+       <span style="flex:1">${esc(g.name)} <span class="muted">${esc(g.group_id)}${g.files ? ' · ' + g.files + ' 份文件' : ''}${g.member_count ? ' · ' + g.member_count + ' 人' : ''}</span></span>
+       <span class="badge ${g.checked ? '' : 'warn'}" style="font-size:10px">${g.checked ? '已纳入' : (g.from === 'qq' ? '本 QQ 的群' : '缓存')}</span>
+     </label>`).join('') : '<div class="muted" style="padding:8px">暂无可显示的群，请先扫码登录或手动添加群号。</div>';
+  modal(`<div class="dialog-head"><h3>群聊 · 读取并框选</h3><span class="link dialog-close" id="gm-close">关闭 ✕</span></div>
+    <div class="muted" id="gm-status">${status}${d.error ? '<br><span style="color:var(--warn)">' + esc(d.error) + '</span>' : ''}</div>
+    <div class="row gap" style="margin:10px 0 6px">
+      <input id="gm-search" placeholder="搜索群名 / 群号" style="flex:1">
+      <button class="btn small" id="gm-reload">读取我的 QQ 群</button>
+      <button class="btn small" id="gm-all">全选</button>
+      <button class="btn small" id="gm-none">全不选</button>
+    </div>
+    <div class="grow-list" id="gm-list" style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px">${rows}</div>
+    <h4 style="margin:12px 0 6px">手动添加群号</h4>
     <div class="row gap">
       <input id="gm-gid" placeholder="群号（纯数字）" style="flex:1">
       <input id="gm-name" placeholder="显示名（可选）" style="flex:1">
-      <button class="btn primary small" id="gm-add">添加</button>
+      <button class="btn primary small" id="gm-add">加入列表</button>
     </div>
+    <div class="actions"><button class="btn" id="gm-cancel">取消</button><button class="btn primary" id="gm-save">保存选择</button></div>
     <div class="muted" id="gm-msg" style="margin-top:8px"></div>`);
-  $('#gm-close').onclick = closeModal;
-  $('#dialog').querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => {
-    b.disabled = true;
+  const count = () => $('#dialog').querySelectorAll('.gm-chk:checked').length;
+  const sync = () => { $('#gm-save').textContent = `保存选择（${count()} 个群）`; };
+  sync();
+  $('#gm-close').onclick = closeModal; $('#gm-cancel').onclick = closeModal;
+  $('#dialog').querySelectorAll('.gm-chk').forEach(c => c.onchange = sync);
+  $('#gm-all').onclick = () => { $('#dialog').querySelectorAll('.gm-chk').forEach(c => { c.checked = true; }); sync(); };
+  $('#gm-none').onclick = () => { $('#dialog').querySelectorAll('.gm-chk').forEach(c => { c.checked = false; }); sync(); };
+  $('#gm-search').oninput = (e) => {
+    const k = (e.target.value || '').trim().toLowerCase();
+    $('#dialog').querySelectorAll('.gm-row').forEach(r => { r.style.display = !k || r.dataset.k.includes(k) ? '' : 'none'; });
+  };
+  $('#gm-reload').onclick = async () => {
+    $('#gm-status').textContent = '正在读取本 QQ 的群列表…';
     try {
-      const r = await api('/api/groups/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code: b.dataset.remove})});
-      if (!r.ok) return toast('移除失败：' + (r.error || ''), 6000);
-      toast('已移除，点「刷新来源」清理该群索引', 6000);
-      await groupsModal();
-    } catch (e) { toast('移除失败：' + e.message); }
-  });
-  $('#dialog').querySelectorAll('[data-add-gid]').forEach(b => b.onclick = async () => {
-    b.disabled = true;
-    try {
-      const r = await api('/api/groups/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code:'', display: b.dataset.addName, qq_group: b.dataset.addGid})});
-      if (!r.ok) return toast('添加失败：' + (r.error || ''), 6000);
-      toast('已添加，点「刷新来源」拉取该群文件', 6000);
-      await groupsModal();
-    } catch (e) { toast('添加失败：' + e.message); }
-  });
-  $('#gm-add').onclick = async () => {
+      const r = await api('/api/qq/groups');
+      if (!r.groups || !r.groups.length) {
+        $('#gm-status').innerHTML = '未读到在线群列表：' + esc(r.error || '请先在「QQ 登录」里扫码，或启动 NapCat');
+        return;
+      }
+      // 把在线群合并进当前列表（保留已勾选项）
+      const box = $('#gm-list');
+      const seen = new Set([...box.querySelectorAll('.gm-chk')].map(c => c.dataset.gid));
+      r.groups.forEach(g => {
+        if (seen.has(g.group_id)) return;
+        seen.add(g.group_id);
+        const el = document.createElement('label');
+        el.className = 'grow-row gm-row';
+        el.dataset.k = (g.name + ' ' + g.group_id).toLowerCase();
+        el.style.cssText = 'cursor:pointer;align-items:center;gap:8px';
+        el.innerHTML = `<input type="checkbox" class="gm-chk" data-gid="${esc(g.group_id)}" data-name="${esc(g.name)}">
+          <span style="flex:1">${esc(g.name)} <span class="muted">${esc(g.group_id)}</span></span>
+          <span class="badge" style="font-size:10px">新读到</span>`;
+        box.appendChild(el);
+        el.querySelector('.gm-chk').onchange = sync;
+      });
+      $('#gm-status').innerHTML = `已读取本 QQ 加入的 <b>${r.groups.length}</b> 个群，可继续框选。`;
+      sync();
+    } catch (e) { $('#gm-status').textContent = '读取失败：' + e.message; }
+  };
+  $('#gm-add').onclick = () => {
     const gid = ($('#gm-gid').value || '').trim();
-    if (!gid) return toast('请填写群号');
+    const name = ($('#gm-name').value || '').trim() || ('群' + gid);
+    if (!/^\d+$/.test(gid)) return toast('群号必须是纯数字');
+    const box = $('#gm-list');
+    const exists = [...box.querySelectorAll('.gm-chk')].find(c => c.dataset.gid === gid);
+    if (exists) { exists.checked = true; toast('该群已在列表中，已为你勾选'); sync(); return; }
+    const el = document.createElement('label');
+    el.className = 'grow-row gm-row'; el.dataset.k = (name + ' ' + gid).toLowerCase();
+    el.style.cssText = 'cursor:pointer;align-items:center;gap:8px';
+    el.innerHTML = `<input type="checkbox" class="gm-chk" checked data-gid="${esc(gid)}" data-name="${esc(name)}">
+      <span style="flex:1">${esc(name)} <span class="muted">${esc(gid)}</span></span>
+      <span class="badge" style="font-size:10px">手动添加</span>`;
+    box.appendChild(el); el.querySelector('.gm-chk').onchange = sync;
+    $('#gm-gid').value = ''; $('#gm-name').value = ''; sync();
+  };
+  $('#gm-save').onclick = async () => {
+    const picked = [...$('#dialog').querySelectorAll('.gm-chk:checked')]
+      .map(c => ({ qq_group: c.dataset.gid, display: c.dataset.name }));
+    const btn = $('#gm-save'); btn.disabled = true; btn.textContent = '保存中…';
     try {
-      const r = await api('/api/groups/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code:'', display: ($('#gm-name').value || '').trim(), qq_group: gid})});
-      if (!r.ok) return toast('添加失败：' + (r.error || ''), 6000);
-      toast('已添加，点「刷新来源」拉取该群文件', 6000);
-      await groupsModal();
-    } catch (e) { toast('添加失败：' + e.message); }
+      const r = await api('/api/groups/set', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({groups: picked})});
+      closeModal();
+      toast(`已保存 ${r.saved} 个群到搜索池，正在刷新分类树…`, 6000);
+      state.group = ''; state.path = []; state.selected.clear();
+      await loadState(); await reload();
+      if (d.online) $('#btn-refresh').click();   // 异步拉取新勾选群的文件
+    } catch (e) { btn.disabled = false; btn.textContent = '保存选择'; $('#gm-msg').textContent = '保存失败：' + e.message; }
   };
 }
 
@@ -334,7 +380,7 @@ async function groupsModal() {
 async function loadVault() {
   try {
     const v = await api('/api/vault/status');
-    $('#vault-path').textContent = `库：${v.path}` + (v.plugin ? ' · AI 插件已装' : '');
+    $('#vault-path').textContent = `库：${v.path}` + (v.plugin ? ' · AI 插件已装' : '') + (v.obsidian_auto_open ? ' · 导入后自动打开' : '');
     $('#vault-path').title = '点击复制库路径：' + v.path;
     $('#vault-path').onclick = () => { navigator.clipboard.writeText(v.path); toast('库路径已复制，可在 Obsidian 里「打开文件夹作为库」'); };
     let localHint = '';
@@ -343,66 +389,196 @@ async function loadVault() {
       window.__local = ls;
       if (ls.pending > 0) localHint = ` · <b>本地已另存 ${ls.pending} 份</b>（QQ 离线时可直接导入）`;
     } catch (_) { /* 只读盘点失败不影响主链路 */ }
-    $('#vault-stat').innerHTML = `已入库 <b>${v.downloaded}</b> / ${v.total} 份 · 待导入 <b>${v.pending}</b> 份 · 笔记 <b>${v.notes}</b> 篇 · 大纲 <b>${v.outlines}</b> 页${localHint}`;
-    $('#vault-note').textContent = `自动分类目录：${v.structure}。导入需显式确认，单批最多 ${window.__cap || 30} 个；QQ 接口不可用时会自动改从本机已另存的群文件导入，链路不中断。`;
+    const reportHint = v.report_exists ? ` · <b>导入报告已生成</b>（🆕 ${v.recent} 份）` : '';
+    $('#vault-stat').innerHTML = `已入库 <b>${v.downloaded}</b> / ${v.total} 份 · 待导入 <b>${v.pending}</b> 份 · 笔记 <b>${v.notes}</b> 篇 · 大纲 <b>${v.outlines}</b> 页${reportHint}${localHint}`;
+    $('#vault-note').textContent = `导入完成会自动打开 Obsidian 的「本次导入报告」：新文件在原有分类里带 🆕 标记，正文全文写入笔记，库内 AI 可读取全部已导入内容。导入需显式确认，单批最多 ${window.__cap || 30} 个；QQ 接口不可用时自动改从本机已另存的群文件导入。`;
   } catch (e) { $('#vault-stat').textContent = '库状态读取失败：' + e.message; }
 }
 
-function vaultImportModal() {
+async function vaultImportModal() {
   const cap = window.__cap || 30;
   const pending = state.files.filter(f => !f.downloaded);
   const preview = pending.slice(0, cap);
+  let targets = null;
+  try { targets = await api('/api/vault/targets'); } catch (_) { /* 目标库只读失败不阻断导入 */ }
+  window.__vaultTargets = targets;
+  const opts = (targets?.vaults || []).map(v =>
+    `<option value="${esc(v.path)}" ${v.current ? 'selected' : ''}>${esc(v.name)}${v.current ? '（当前库）' : ''} · ${esc(v.path)}</option>`).join('');
   modal(`<div class="dialog-head"><h3>一键批量导入到 Obsidian</h3><span class="link dialog-close" id="vi-close">关闭 ✕</span></div>
     <div class="muted">将按<b>当前筛选范围</b>（${state.path.length ? esc(state.path.join(' › ')) : '全部'}）导入尚未下载的文件，
-    单批最多 <b>${cap}</b> 个。导入后自动抽取正文、生成摘要，按「来源 / 群聊 / 领域 / 学科 / 类型」落盘，
-    并生成一一对应的预览笔记与多级大纲。</div>
-    <div class="list" style="margin-top:10px">${preview.length ? preview.slice(0, 12).map(x => `<div>· ${esc(x.name)}</div>`).join('') : '<div>当前页没有待下载文件</div>'}${preview.length > 12 ? `<div>… 其余 ${preview.length - 12} 个</div>` : ''}</div>
-    <label style="display:block;margin:12px 0 0"><input type="checkbox" id="vi-confirm"> 我已确认：这会真实写入文件到本机 Obsidian 库（QQ 离线时用已另存的群文件）</label>
+    单批最多 <b>${cap}</b> 个。导入后自动抽取正文、按原有分类落盘，生成预览笔记、多级大纲与「本次导入报告」。</div>
+    <div class="list" style="margin-top:10px">${preview.length ? preview.slice(0, 8).map(x => `<div>· ${esc(x.name)}</div>`).join('') : '<div>当前页没有待下载文件</div>'}${preview.length > 8 ? `<div>… 其余 ${preview.length - 8} 个</div>` : ''}</div>
+    <label style="display:block;margin:12px 0 4px">导入到哪个 Obsidian 库</label>
+    <select id="vi-target" class="mini" style="width:100%">${opts || '<option value="">当前库</option>'}</select>
+    <input id="vi-newvault" placeholder="或新建一个库（填名称，自动建在桌面）" style="width:100%;margin-top:6px">
+    <label style="display:block;margin:12px 0 0"><input type="checkbox" id="vi-open" checked> 导入后自动在 Obsidian 打开「本次导入报告」</label>
+    <label style="display:block;margin:6px 0 0"><input type="checkbox" id="vi-confirm"> 我已确认：这会真实写入文件到本机 Obsidian 库（QQ 离线时用已另存的群文件）</label>
     <div class="actions"><button class="btn" id="vi-cancel">取消</button><button class="btn primary" id="vi-ok">确认批量导入</button></div>
     <div class="muted" id="vi-msg" style="margin-top:8px"></div>`);
   $('#vi-close').onclick = closeModal; $('#vi-cancel').onclick = closeModal;
   $('#vi-ok').onclick = async () => {
     if (!$('#vi-confirm').checked) return $('#vi-msg').textContent = '请先勾选确认。';
     const btn = $('#vi-ok'); btn.disabled = true; btn.textContent = '导入中…';
-    $('#vi-msg').textContent = '正在下载、抽取正文、自动分类入库（可能需要一点时间）…';
+    const msg = (t) => { $('#vi-msg').textContent = t; };
     try {
+      const newName = ($('#vi-newvault').value || '').trim();
+      const sel = ($('#vi-target').value || '');
+      const cur = targets?.current || '';
+      let target = null;
+      if (newName) target = { kind: 'new', name: newName };
+      else if (sel && cur && sel !== cur) target = { kind: 'existing', path: sel };
+      if (target) {
+        msg('正在准备目标 Obsidian 库（部署 AI 插件、保留原有配置）…');
+        const tr = await api('/api/vault/target', {method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({target, open:false})});
+        if (!tr.ok) throw new Error(tr.error || '目标库切换失败');
+      }
+      msg('正在导入、抽取正文、自动分类入库（可能需要一点时间）…');
       const r = await api('/api/vault/import', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({confirm:true, ids:[], dim:state.dim,
-          node:JSON.stringify(state.path), q:state.search||'', group:state.group||'', kind:state.kind||''})});
-      if (!r.ok) { $('#vi-msg').textContent = '导入未完成：' + (r.error || '未知原因'); btn.disabled=false; btn.textContent='确认批量导入'; return; }
-      closeModal();
-      toast(`批量导入完成：成功 ${r.succeeded}/${r.attempted} 个，已自动分类入库并生成笔记与大纲${r.note ? ' · '+r.note : ''}`, 8000);
+          node:JSON.stringify(state.path), q:state.search||'', group:state.group||'', kind:state.kind||'',
+          open_after: $('#vi-open').checked})});
+      if (!r.ok) throw new Error(r.error || '未知原因');
       state.selected.clear(); await loadState(); await reload(); await loadVault();
-    } catch (e) { $('#vi-msg').textContent = '导入失败：' + e.message; btn.disabled=false; btn.textContent='确认批量导入'; }
+      vaultResultModal(r);
+    } catch (e) {
+      msg('导入失败：' + e.message); btn.disabled = false; btn.textContent = '确认批量导入';
+    }
+  };
+}
+
+function vaultResultModal(r) {
+  const v = r.vault || {};
+  const bd = Object.entries(r.breakdown || {}).sort((a,b) => b[1]-a[1]);
+  const open = r.open || {};
+  const openTxt = open.method === 'obsidian_uri' ? '✅ 已自动在 Obsidian 打开「本次导入报告」'
+    : open.method === 'folder' ? '⚠ 已打开库文件夹（Obsidian 未安装或协议未注册，请手动「打开文件夹作为库」）'
+    : (open.method === 'skipped' ? '按你的选择，未自动打开 Obsidian' : '自动打开未成功，可用下方按钮手动打开');
+  modal(`<div class="dialog-head"><h3>导入完成 · 现在就能看到成效</h3><span class="link dialog-close" id="vr-close">关闭 ✕</span></div>
+    <div style="line-height:1.9">
+      <div>本次成功导入 <b>${r.imported ?? r.succeeded ?? 0}</b> / ${r.attempted ?? 0} 份 · 通道：${esc(r.source || 'QQ 群文件')}</div>
+      <div>本库已入库 <b>${v.downloaded ?? 0}</b> / ${v.total ?? 0} 份 · 笔记 <b>${v.notes ?? 0}</b> 篇 · 大纲 <b>${v.outlines ?? 0}</b> 页</div>
+      <div>${openTxt}</div>
+    </div>
+    <h4 style="margin:14px 0 6px">新文件已落在原有分类里</h4>
+    <div class="grow-list">${bd.length ? bd.map(([k,n]) =>
+      `<div class="grow-row"><span>${esc(k)}</span><span class="badge">+${n} 份 🆕</span></div>`).join('')
+      : '<div class="muted" style="padding:6px">本次没有新增文件</div>'}</div>
+    <div class="muted" style="margin-top:10px">报告：<b>${esc(r.report || '00-本次导入.md')}</b>（在 Obsidian 里打开即是第一页）。
+      正文全文已写入每篇笔记，库内 AI 可读取全部已导入内容；未下载条目仍只有元数据。</div>
+    <div class="actions">
+      <button class="btn" id="vr-folder">打开库文件夹</button>
+      <button class="btn primary" id="vr-open">在 Obsidian 打开报告</button>
+      <button class="btn" id="vr-close2">关闭</button>
+    </div>`);
+  const close = () => { closeModal(); };
+  $('#vr-close').onclick = close; $('#vr-close2').onclick = close;
+  $('#vr-open').onclick = async () => {
+    try { const d = await api('/api/vault/open-obsidian', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({file: r.report || ''})}); toast(d.opened ? '已在 Obsidian 打开' : ('请手动打开：' + d.path), 7000); }
+    catch (e) { toast('打开失败：' + e.message); }
+  };
+  $('#vr-folder').onclick = () => $('#btn-vault-open').click();
+}
+
+async function vaultTargetModal() {
+  let t;
+  try { t = await api('/api/vault/targets'); } catch (e) { return toast('读取本机 Obsidian 库失败：' + e.message); }
+  const vs = t.vaults || [];
+  modal(`<div class="dialog-head"><h3>挑选 / 新建 Obsidian 库</h3><span class="link dialog-close" id="vt-close">关闭 ✕</span></div>
+    <div class="muted">可选择本机已有库（会保留它原有的 Obsidian 设置，只追加 AI 插件与自动分类内容），或新建一个独立库。已导入的资料会自动迁移过去。</div>
+    <h4 style="margin:14px 0 6px">本机已有库（${vs.length}）</h4>
+    <div class="grow-list" style="max-height:220px;overflow:auto">
+      ${vs.length ? vs.map(v => `<label class="grow-row" style="cursor:pointer;align-items:center;gap:8px">
+        <input type="radio" name="vt" value="${esc(v.path)}" ${v.current ? 'checked' : ''}>
+        <span style="flex:1">${esc(v.name)} ${v.current ? '<span class="badge">当前</span>' : ''}<br><span class="muted">${esc(v.path)}${v.plugin ? ' · 已装 AI 插件' : ''}</span></span></label>`).join('')
+        : '<div class="muted" style="padding:8px">没有发现已有的 Obsidian 库，可以直接新建。</div>'}
+    </div>
+    <h4 style="margin:12px 0 6px">或新建一个库</h4>
+    <input id="vt-new" placeholder="新库名称（如：我的课程资料库）" style="width:100%">
+    <div class="actions"><button class="btn" id="vt-cancel">取消</button><button class="btn primary" id="vt-ok">使用这个库</button></div>
+    <div class="muted" id="vt-msg" style="margin-top:8px"></div>`);
+  $('#vt-close').onclick = closeModal; $('#vt-cancel').onclick = closeModal;
+  $('#vt-ok').onclick = async () => {
+    const name = ($('#vt-new').value || '').trim();
+    const radio = $('#dialog').querySelector('input[name=vt]:checked');
+    let target = name ? {kind:'new', name} : (radio ? {kind:'existing', path: radio.value} : {kind:'current'});
+    const btn = $('#vt-ok'); btn.disabled = true; btn.textContent = '准备中…';
+    try {
+      const r = await api('/api/vault/target', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({target})});
+      if (!r.ok) throw new Error(r.error || '切换失败');
+      closeModal();
+      toast(`已切换到「${r.name}」：AI 插件已部署、大纲已重建${r.migrated ? `、迁移 ${r.migrated} 份已导入资料` : ''}`, 8000);
+      await loadVault(); await loadState(); await reload();
+    } catch (e) { btn.disabled = false; btn.textContent = '使用这个库'; $('#vt-msg').textContent = '失败：' + e.message; }
   };
 }
 
 function vaultSearchModal() {
-  modal(`<div class="dialog-head"><h3>库内 AI 检索</h3><span class="link dialog-close" id="vq-close">关闭 ✕</span></div>
-    <div class="muted">只检索<b>已导入 Obsidian 库</b>（含正文与笔记）的资料，结果可直接点开预览笔记。</div>
-    <div class="row gap" style="margin-top:10px"><input id="vq-q" class="ask" placeholder="如：四六级真题 / 高等数学 / 复变函数" style="flex:1"><button class="btn primary small" id="vq-go">检索</button></div>
-    <div class="list" id="vq-list" style="margin-top:10px;max-height:300px">输入关键词开始检索…</div>`);
+  modal(`<div class="dialog-head"><h3>库内 AI 检索 · 可读取全文</h3><span class="link dialog-close" id="vq-close">关闭 ✕</span></div>
+    <div class="muted">默认检索<b>全部资料</b>：已导入的可读取完整正文，未下载的明确标注「仅元数据」；也可切换为只搜本库已导入笔记。</div>
+    <div class="row gap" style="margin-top:10px">
+      <select id="vq-scope" class="mini"><option value="all">全部资料（含元数据）</option><option value="vault">仅本库已导入</option></select>
+      <input id="vq-q" class="ask" placeholder="如：四六级真题 / 罗尔中值定理 / 马原" style="flex:1">
+      <button class="btn primary small" id="vq-go">检索</button>
+    </div>
+    <div class="muted" id="vq-sum" style="margin-top:6px"></div>
+    <div class="list" id="vq-list" style="margin-top:6px;max-height:320px;overflow:auto">输入关键词开始检索…</div>
+    <div id="vq-body" style="display:none;margin-top:10px;max-height:220px;overflow:auto;white-space:pre-wrap;font-size:12px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>`);
   $('#vq-close').onclick = closeModal;
   const go = async () => {
     const q = ($('#vq-q').value || '').trim();
     if (!q) return toast('请输入检索词');
+    const scope = $('#vq-scope').value;
     $('#vq-list').textContent = '检索中…';
+    $('#vq-body').style.display = 'none';
     try {
-      const r = await api(`/api/vault/search?q=${encodeURIComponent(q)}&limit=20`);
+      const r = await api(`/api/vault/search?q=${encodeURIComponent(q)}&scope=${scope}&limit=20`);
+      $('#vq-sum').textContent = r.answer || '';
       $('#vq-list').innerHTML = r.found ? r.items.map(x =>
-        `<div class="srcitem" data-id="${esc(x.id)}" style="display:block;padding:5px 0;border-bottom:1px solid var(--line)">
-           <b>${esc(x.name)}</b><div class="muted">${esc(x.chain)} · ${esc(x.subject)} / ${esc(x.kind)}</div>
-           ${x.excerpt ? `<div class="muted">${esc(x.excerpt.slice(0,120))}…</div>` : ''}</div>`).join('')
-        : `<div class="muted" style="padding:8px">${esc(r.answer || '库内没有命中')}</div>`;
-      $('#vq-list').querySelectorAll('.srcitem').forEach(n => n.onclick = () => showPreview(n.dataset.id));
+        `<div class="srcitem vq-item" data-id="${esc(x.id)}" style="display:block;padding:6px 0;border-bottom:1px solid var(--line)">
+           <b>${esc(x.name)}</b> <span class="badge ${x.has_body ? '' : 'warn'}" style="font-size:10px">${x.has_body ? '含正文 ' + x.body_chars + ' 字' : '仅元数据'}</span>
+           <div class="muted">${esc(x.chain)} · ${esc(x.subject)} / ${esc(x.kind)}</div>
+           ${x.excerpt ? `<div class="muted">${esc(x.excerpt.slice(0,140))}…</div>` : ''}
+           <div class="row gap" style="margin-top:4px">
+             ${x.wikilink ? `<button class="btn small vq-note">打开预览笔记</button>` : ''}
+             ${x.has_body ? `<button class="btn small primary vq-full">读取全文</button>` : ''}
+           </div></div>`).join('')
+        : `<div class="muted" style="padding:8px">${esc(r.answer || '没有命中')}</div>`;
+      $('#vq-list').querySelectorAll('.vq-note').forEach(b => b.onclick = (e) => {
+        e.stopPropagation(); showPreview(b.closest('.vq-item').dataset.id);
+      });
+      $('#vq-list').querySelectorAll('.vq-full').forEach(b => b.onclick = async (e) => {
+        e.stopPropagation();
+        const id = b.closest('.vq-item').dataset.id;
+        $('#vq-body').style.display = 'block'; $('#vq-body').textContent = '正在读取全文…';
+        try {
+          const c = await api('/api/vault/content?id=' + encodeURIComponent(id));
+          $('#vq-body').textContent = (c.name ? `【${c.name}】\n` : '') + (c.body || c.note_text || '（无正文）');
+        } catch (err) { $('#vq-body').textContent = '读取失败：' + err.message; }
+      });
+      $('#vq-list').querySelectorAll('.vq-item').forEach(n => n.onclick = () => showPreview(n.dataset.id));
     } catch (e) { $('#vq-list').textContent = '检索失败：' + e.message; }
   };
   $('#vq-go').onclick = go;
+  $('#vq-scope').onchange = go;
   $('#vq-q').onkeydown = (e) => { if (e.key === 'Enter') go(); };
 }
 
 $('#btn-vault-import').onclick = vaultImportModal;
 $('#btn-vault-search').onclick = vaultSearchModal;
+$('#btn-vault-target').onclick = vaultTargetModal;
+const openInObsidian = async (file) => {
+  try {
+    const r = await api('/api/vault/open-obsidian', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({file: file || ''})});
+    toast(r.opened ? (r.method === 'obsidian_uri' ? '已在 Obsidian 打开本库' : (r.note || '已打开库文件夹'))
+                   : ('未能自动打开，库路径：' + r.path), 8000);
+  } catch (e) { toast('打开失败：' + e.message); }
+};
+$('#btn-vault-obsidian').onclick = () => openInObsidian('');
+$('#btn-vault-obsidian2').onclick = () => openInObsidian('');
 $('#btn-vault-open').onclick = async () => {
   try { const r = await api('/api/vault/open', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
     toast(r.opened ? '已打开库文件夹：' + r.path : '库路径：' + r.path + '（可复制后在 Obsidian 里打开）', 7000);
@@ -446,7 +622,7 @@ $('#btn-ask-search').onclick = () => {
   if (!q) return toast('先在搜索框输入查询，再点「问 AI」');
   $('#ask').value = q; ask(q);
 };
-$('#chips').innerHTML = ['高等数学有哪些期末真题？', '复变函数积分变换怎么复习？', '线性代数课件资源在哪？', '宿舍水电费在哪交？']
+$('#chips').innerHTML = ['罗尔、拉格朗日、柯西中值定理', '线代期中真题有哪些？', '马原考试回忆版', '复变函数积分变换怎么复习？']
   .map(q => `<span class="chip">${esc(q)}</span>`).join('');
 $('#chips').querySelectorAll('.chip').forEach(el => el.onclick = () => ask(el.textContent));
 
@@ -456,10 +632,10 @@ async function checkSetup() {
     if (!d.done) {
       const b = $('#setup-banner');
       b.classList.remove('hidden');
-      b.innerHTML = '👋 <b>第一次用？</b> 花 2 分钟完成 2 步配置（安装 NapCat + 填你的 QQ 群）就能开始，不用懂原理。'
-        + ' <button class="btn small primary" id="sb-go">开始配置</button>'
-        + ' <span class="muted">配置向导会一步步带你做。</span>';
-      $('#sb-go').onclick = () => { window.location.href = '/setup'; };
+      b.innerHTML = '👋 <b>第一次用？</b> 点顶栏「群聊」读取并框选你要搜索的 QQ 群，再点「刷新来源」即可开始分类整理。'
+        + ' <button class="btn small primary" id="sb-go">去框选群聊</button>'
+        + ' <span class="muted">没登录也能先框选本机已缓存的群。</span>';
+      $('#sb-go').onclick = groupsModal;
     }
   } catch (e) { /* 配置接口不可用时静默，不影响主界面 */ }
 }

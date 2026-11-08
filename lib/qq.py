@@ -171,15 +171,33 @@ def download_to(url: str, dest: Path, timeout: int = 240) -> Path:
     return dest
 
 
-def list_groups() -> list[dict]:
-    """返回本 QQ 加入的群列表（需 OneBot 在线）。用于新手向导自动列出可选群。"""
+def list_groups() -> tuple[list[dict], str]:
+    """返回 (本 QQ 加入的全部群, 错误说明)。供「群聊框选」读取真实群清单。
+
+    v3.5.0：兼容 NapCat/OneBot 不同返回形态（list / {"groups": [...]} /
+    {"group_list": [...]}），并带上成员数；任何异常都返回空表 + 可读原因，
+    绝不抛到界面上让弹窗白屏。
+    """
     try:
         data = call("/get_group_list", {}, timeout=12, retries=0)
-        out = []
-        for g in (data or []):
-            gid = g.get("group_id")
-            if gid:
-                out.append({"group_id": str(gid), "name": g.get("group_name", "") or ""})
-        return out
-    except Exception:
-        return []
+        if isinstance(data, dict):
+            data = data.get("groups") or data.get("group_list") or data.get("list") or []
+        if not isinstance(data, list):
+            return [], "群列表返回格式无法识别"
+        out, seen = [], set()
+        for g in data:
+            if not isinstance(g, dict):
+                continue
+            gid = str(g.get("group_id") or g.get("groupId") or "").strip()
+            if not gid.isdigit() or gid in seen:
+                continue
+            seen.add(gid)
+            out.append({
+                "group_id": gid,
+                "name": str(g.get("group_name") or g.get("groupName") or "").strip() or f"群{gid}",
+                "member_count": int(g.get("member_count") or g.get("memberCount") or 0),
+            })
+        out.sort(key=lambda x: x["name"])
+        return out, ""
+    except Exception as e:
+        return [], f"{type(e).__name__}: {str(e)[:160]}"

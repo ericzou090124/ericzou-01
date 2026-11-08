@@ -1,15 +1,18 @@
 """grounded 问答：命中判定与源文件索引一律由本地检索给出，模型只负责中文概括。
 
-v3.4.0 智能化改造（直接回应用户「明明有四六级真题，AI 却说没有」）：
-- **范围按维度映射**：前端按「学科 / 类型 / 来源」浏览时，浏览路径必须映射到对应字段。
-  旧版把 path[0] 一律当 domain，导致在「按学科 › 英语」下提问被错筛成
-  domain=英语 → 空池 → 谎报「没有」。现在按 catalog.DIMS[dim] 映射。
-- **口语 / 别名扩展**：「四六级真题」→ CET / CET4 / CET6 / 四级 / 六级 / 真题 / 试卷 /
-  题+解 等，解决「文件名是 CET6题+解，用户说的是四六级真题」的词面不一致。
-- **过滤器分级放宽**：问题里识别出的 类型 / 科目 / 领域 只是「线索」不是硬约束；
-  严格范围搜不到就逐级放宽，并在回答里如实标注放宽了什么。群聊范围始终保留。
-- **找资料意图**：「给我找一套 / 有没有 / 找一份」走确定性目录清单，直接列出真实文件 +
-  可点击源索引，不让模型去编「无法提供真题内容」。
+v3.5.0 泛化改造（回应用户「AI 能搜出来的资料很少，只有四六级又快又准」）：
+- **根因**：旧版靠 jieba 通用词典切词 + 一份手工写的「四六级」别名词表，
+  专业术语（罗尔/柯西/马原/线代）被切碎；问题里识别出的分类词被当成**硬过滤**，
+  「机器学习」被错筛成 domain=学习、「罗尔…中值定理」被错筛成 复变函数与积分变换；
+  再叠加为 CET6 精准度加的 0.55 分数闸门，普通问题往往只剩 5 条甚至误报「没有」。
+- **现在**：lib/vocab.py 从当前目录的真实文件名/分类里自动学词（df 词典、
+  最长匹配切词、共现别名、简称跳字、错字近似），**不硬编码任何学科词表**。
+  换任何一个 QQ 群、任何一门课都自动获得同等的召回能力。
+  四六级的 phrase_expansions 降级为可选增强，删掉它也能通过共现学到 CET6。
+- 问题里的分类线索只做**相关性加权**，不再当硬过滤；硬约束只有用户显式选的
+  浏览路径与群聊范围。严格范围无结果时仍逐级放宽并如实标注。
+- 命中即返回，不再用 min_relevance 把真实命中判成「没找到」；top_k 提高到 8，
+  回答给出「共命中 N 份」并列出更多可点击源索引。
 - 未下载条目仍一律标注「仅元数据、无正文摘要」；绝不臆造正文。
 """
 from __future__ import annotations
@@ -17,7 +20,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import catalog, config, index, llm
+from . import catalog, config, index, llm, vocab
 
 NOT_FOUND = "授权可见的资料中没有检索到相关信息"
 LIST_INTENT = re.compile(r"有哪些|哪几|多少|清单|列一下|都有什么|没下载|未下载|还没下载|存在哪些|包含哪些")
@@ -35,6 +38,13 @@ SYSTEM = (
 
 _LABELS = {"domain": "领域", "subject": "科目", "kind": "类型",
            "group": "群聊", "source": "来源", "folder": "文件夹"}
+# 口语虚词：不作为「用户实义词」，避免「有哪些资料」把全库都召回
+_QUERY_STOP = {
+    "资料", "文件", "内容", "相关", "关于", "一下", "这个", "那个", "哪些", "哪个",
+    "多少", "有没有", "请问", "帮我", "看看", "给我", "我想", "需要", "推荐", "一套",
+    "一份", "什么", "怎么", "怎么样", "咋样", "所有", "全部", "其它", "其他", "可以",
+    "总结", "列一下", "找一套", "找一份", "找找", "想找", "来一套", "要一套",
+}
 
 
 def _hay(x: dict, body: str = "") -> str:
@@ -57,15 +67,15 @@ def _source(x: dict, n: int, score: float = 0.0) -> dict:
     }
 
 
-def _filters(q: str, cfg: dict) -> dict:
-    """从问题文本识别 科目 / 领域 / 类型「线索」。注意：这只是线索，不是硬约束。"""
+def _hints(q: str, cfg: dict) -> dict:
+    """问题里的 科目/领域/类型 线索 —— **只用于加权，绝不用于过滤**。"""
     c = cfg.get("classification") or {}
     f = {}
     for label in (c.get("subjects") or {}):
         if label == "综合":
             continue
         kws = c["subjects"][label] or []
-        if label in q or any(k and k in q for k in kws):
+        if label in q or any(k and len(k) >= 2 and k in q for k in kws):
             f["subject"] = label
             break
     for d in (c.get("domains") or []):
@@ -77,7 +87,8 @@ def _filters(q: str, cfg: dict) -> dict:
         label = rule["name"]
         if label == "其他资料":
             continue
-        if label in q or any(k and k not in generic and k in q for k in rule.get("keywords", [])):
+        if label in q or any(k and len(k) >= 2 and k not in generic and k in q
+                             for k in rule.get("keywords", [])):
             f["kind"] = label
             break
     return f
@@ -130,90 +141,128 @@ def _is_find_intent(q: str, cfg: dict) -> bool:
     return any(str(w) in q for w in words)
 
 
-def _recall_terms(q: str, cfg: dict) -> tuple[list[str], set[str]]:
-    """把口语问题扩展成「真正能命中文件名」的检索词集合。
+def _recall_terms(q: str, cfg: dict, cat: dict) -> tuple[list[str], set[str], set[str]]:
+    """通用召回词：(全部候选词, 用户实义词, 自动扩展词)。
 
-    返回 (全部候选词, 用户原始词)。别名表只在「标签或长词确实出现在问题里」时整组展开，
-    避免把整库泛词都塞进来导致召回噪声。
+    核心来自 vocab（从当前目录自动学出），手工词表只是可选增强；
+    即使把 config.search.phrase_expansions 全部删空，泛化能力也不受影响。
     """
     low = (q or "").strip().lower()
-    base = [str(t).strip().lower() for t in index.query_terms(q)]
-    extra: list[str] = []
-    for key, words in (((cfg.get("search") or {}).get("phrase_expansions") or {})).items():
+    try:
+        v = vocab.get(cat)
+        core_v, extra_v = v.expand(q)
+        # 区分度过滤：覆盖超过 18% 目录的词（「学习」「pdf」「其他资料」「通选」…）
+        # 没有检索价值，留着会让任意问题命中半库。
+        informative = lambda t: v.informative(t)
+    except Exception:
+        v, core_v, extra_v = None, [], []
+        informative = lambda t: True
+    # jieba / trigram 词同样算用户实义词（兼容 FTS 与历史打桩测试）
+    try:
+        base = [str(t).strip().lower() for t in index.query_terms(q, 32)]
+    except TypeError:
+        base = [str(t).strip().lower() for t in index.query_terms(q)]
+    raw_core = {t for t in (core_v + base) if len(t) >= 2 and t not in _QUERY_STOP}
+    core = {t for t in raw_core if informative(t)}
+    if not core and v is not None:
+        # 只在「词完全没在库里出现」时保留兜底；绝不把「学习」这类覆盖半库的超泛词放回来
+        unknown = [t for t in raw_core if v.coverage(t) == 0]
+        core = set(sorted(unknown, key=len, reverse=True)[:1])
+    extra: set[str] = {str(w).lower() for w in extra_v if len(str(w)) >= 2}
+    # 可选增强：手工短语表 / 分类别名（不再必需）
+    for key, words in ((cfg.get("search") or {}).get("phrase_expansions") or {}).items():
         k = str(key).lower()
         if k and k in low:
-            extra.append(k)
-            extra += [str(w).lower() for w in (words or []) if w]
-    aliases = ((cfg.get("classification") or {}).get("aliases") or {})
-    for label, words in aliases.items():
+            extra.add(k)
+            extra |= {str(w).lower() for w in (words or []) if w}
+    for label, words in ((cfg.get("classification") or {}).get("aliases") or {}).items():
         lab = str(label).lower()
         ws = [str(w).lower() for w in (words or []) if w]
         if lab in low or any(len(w) >= 3 and w in low for w in ws):
-            extra.append(lab)
-            extra += ws
-    terms, seen = [], set()
-    for t in base + extra:
-        t = (t or "").strip().lower()
-        if len(t) >= 2 and t not in seen:
-            seen.add(t)
-            terms.append(t)
-    return terms, {t for t in base if len(t) >= 2}
+            extra.add(lab)
+            extra |= set(ws)
+    extra = {t for t in extra if informative(t)} - core
+    # 长词优先，减少「截断子串」噪声
+    terms = sorted(core, key=lambda t: (-len(t), t)) + sorted(extra, key=lambda t: (-len(t), t))
+    return terms[:96], core, extra
 
 
-def _rank(q: str, pool: list[dict], cfg: dict, top_k: int) -> tuple[list[dict], list[str], float]:
-    """在候选池内做「词面 + FTS 正文」混合召回与相关度打分。
-
-    每个条目记录命中的具体词；相关度 = 命中词数 / 全池实际出现过的词数，
-    天然抑制「一个泛词命中一半目录」的假相关。
-    """
-    terms, core = _recall_terms(q, cfg)
+def _rank(q: str, pool: list[dict], cfg: dict, cat: dict, top_k: int,
+          hints: dict | None = None) -> tuple[list[dict], list[str], float]:
+    """词面 + FTS 正文混合召回。用户实义词权重高，自动扩展词只做低权补充。"""
+    terms, core, extra = _recall_terms(q, cfg, cat)
     if not terms:
         return [], [], 0.0
     bodies: dict[str, str] = {}
     try:
-        for h in index.search(q, max(24, top_k * 4)):
+        for h in index.search(q, max(32, top_k * 4), extra=sorted(extra)):
             if h.get("body"):
                 bodies[h["item_id"]] = h["body"]
+    except TypeError:  # 兼容旧签名/打桩
+        try:
+            for h in index.search(q, max(32, top_k * 4)):
+                if h.get("body"):
+                    bodies[h["item_id"]] = h["body"]
+        except Exception:
+            bodies = {}
     except Exception:
         bodies = {}
+    try:
+        similar: dict[str, list[str]] = {
+            t: vocab.get(cat).similar(t, 2) for t in list(core)[:8]
+        }
+    except Exception:
+        similar = {}
+    latin_core = {t for t in core if re.fullmatch(r"[a-z0-9_.+#-]{3,}", t)}
+    # 扩展词单独构成召回时要更严：至少命中 2 个高区分度词，或 1 个极具体词。
+    # 既保留「四六级 → CET6 真题」这类跨词面召回，又挡住「大二 / 高等数学」这类噪声。
+    try:
+        vv = vocab.get(cat)
+        strong = {t for t in extra if vv.coverage(t) <= max(8, vv.n * 0.05)}
+        very_strong = {t for t in extra if 0 < vv.coverage(t) <= 12}
+    except Exception:
+        strong, very_strong = set(extra), set()
     rows = []
     for x in pool:
         body = bodies.get(x["id"], "")
         hay = _hay(x, body)
         name = str(x.get("name") or "").lower()
-        hit = {t for t in terms if t in hay}
-        if not hit:
+        path = str(x.get("path") or "").lower()
+        core_hit = {t for t in core if t in hay}
+        strong_hit = {t for t in strong if t in hay}
+        extra_hit = {t for t in extra if t in hay}
+        soft = {t for t, ws in similar.items() for w in ws if w in hay}
+        if not core_hit and not (len(strong_hit) >= 2 or (strong_hit & very_strong)):
             continue
         s = 0.0
-        core_hit = 0
         latin_hit = 0
-        for t in hit:
-            s += 1.0
+        for t in core_hit:
+            s += 2.0
             if t in name:
-                s += 1.1
-            if t in core:
-                s += 0.9
-                core_hit += 1
-                # 具体英文/数字混合词（CET6 / CET4 / python…）出现在文件名里 = 强证据
-                if re.fullmatch(r"[a-z0-9_.+#-]{3,}", t) and (t in name or t in str(x.get("path", "")).lower()):
-                    latin_hit += 1
-                    s += 2.0
+                s += 1.6
             if body and t in body.lower():
-                s += 0.5
+                s += 0.8
+            if t in latin_core and (t in name or t in path):
+                latin_hit += 1
+                s += 3.0
+        for t in extra_hit:
+            s += 0.35
+            if t in name:
+                s += 0.2
+        s += 0.4 * len(soft)
         if body:
             s += 0.8
-        rows.append({"x": x, "body": body, "hit": hit, "s": s,
-                     "core_hit": core_hit, "latin_hit": latin_hit})
+        for k, v in (hints or {}).items():
+            if str(x.get(k, "")) == v:
+                s += 1.2  # 分类线索只加权，不排除其它条目
+        rows.append({"x": x, "body": body, "hit": core_hit | extra_hit,
+                     "core_hit": len(core_hit), "latin_hit": latin_hit,
+                     "s": s, "score": s, "rel": min(1.0, len(core_hit) / max(1, len(core)) + 0.35)})
     if not rows:
         return [], terms, 0.0
-    valid: set[str] = set()
-    for r in rows:
-        valid |= r["hit"]
-    for r in rows:
-        r["rel"] = len(r["hit"] & valid) / max(1, len(valid))
-        r["score"] = r["s"] + 3.0 * r["rel"]
     rows.sort(key=lambda r: (-r["score"], str(r["x"].get("name", ""))))
-    return rows, terms, rows[0]["rel"]
+    # 有真实命中即算找到，不再用相关度阈值误杀泛化查询
+    return rows, terms, 1.0
 
 
 def _catalog_answer(q: str, rows: list[dict], f: dict, cat: dict, t0: float,
@@ -222,19 +271,21 @@ def _catalog_answer(q: str, rows: list[dict], f: dict, cat: dict, t0: float,
     sel = [r for r in rows if (not r["x"].get("downloaded"))] if only_meta else rows
     if not sel:
         sel = rows
-    top = sel[:8]
+    top = sel[:12]
     dl = sum(1 for r in sel if r["x"].get("downloaded"))
     where = _where(f)
     lines = [f"{i}. {r['x']['name']}（{r['x'].get('subject') or '综合'} / {r['x'].get('kind') or '其他资料'}"
              f" · {'已下载' if r['x'].get('downloaded') else '仅元数据·未下载'}）"
              for i, r in enumerate(top, 1)]
-    head = f"在「{where}」范围内找到 {len(sel)} 份与「{q}」相关的资料"
+    head = f"在「{where}」范围内共找到 {len(sel)} 份与「{q}」相关的资料"
     if relaxed:
         head += f"（{relaxed}）"
-    head += f"，其中已下载 {dl} 份、仅元数据 {len(sel) - dl} 份。前 {len(top)} 份：\n"
+    head += f"，其中已下载 {dl} 份、仅元数据 {len(sel) - dl} 份。相关度最高的 {len(top)} 份：\n"
     tail = ("\n未下载条目只有文件名与分类等元数据，无正文摘要；勾选后点「批量导入到 Obsidian」"
             "即可下载、抽取正文并自动分类入库。" if len(sel) > dl else
             "\n已下载条目含正文，可在下方源文件索引点开预览或打开 Obsidian 笔记。")
+    if len(sel) > len(top):
+        tail += f"\n（还有 {len(sel)-len(top)} 份同类资料，可在左侧分类树或搜索框继续查看。）"
     return {"answer": head + "\n".join(lines) + tail, "found": True, "mode": "catalog",
             "scope": f, "relaxed": relaxed, "total_matched": len(sel),
             "sources": [_source(r["x"], i + 1, r["score"]) for i, r in enumerate(top)],
@@ -268,13 +319,11 @@ def _local_answer(rows: list[dict]) -> str:
 
 
 def _ladder(f: dict, hard: dict, qf: dict) -> list[tuple[dict, str]]:
-    """构造「严格 → 逐级放宽」的过滤器阶梯。群聊范围（用户显式选择）永不丢弃。"""
+    """构造「严格 → 逐级放宽」的过滤器阶梯。群聊范围（用户显式选择）永不丢弃。
+
+    v3.5.0：问题里的分类线索不再是硬过滤，因此阶梯只放宽用户浏览路径。
+    """
     out = [(f, "")]
-    qf2 = {k: v for k, v in qf.items() if k != "kind"}
-    if qf2 != qf:
-        out.append((_merge_filter(hard, qf2), "已自动放宽问题里的「类型」线索"))
-    if qf:
-        out.append((dict(hard), "已自动放宽问题里的分类线索"))
     cur = dict(hard)
     for k in ("folder", "subject", "domain", "kind", "source"):
         if k in cur:
@@ -282,7 +331,6 @@ def _ladder(f: dict, hard: dict, qf: dict) -> list[tuple[dict, str]]:
             out.append((dict(cur), f"已自动放宽浏览范围（{_LABELS.get(k, k)}）"))
     if hard:
         out.append(({}, "已自动放宽到全部授权可见资料"))
-    # 去重（保留首次出现，说明文字取更宽松的那条）
     seen, uniq = set(), []
     for cand, note in out:
         key = tuple(sorted(cand.items()))
@@ -302,27 +350,26 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
                 "scope": _scope_from_path(scope, dim), "took_ms": 0}
     cat = cat or catalog.load()
 
-    # 浏览范围（按维度正确映射）+ 群聊范围 = 用户显式约束，始终保留
+    # 硬约束只有用户显式选择：浏览路径（按维度映射）+ 群聊范围
     hard = _scope_from_path(scope, dim)
     gf = str(group or "").strip()
     if gf:
         hard["group"] = gf
-    # 问题里识别出的分类字段 = 线索，可被放宽
-    qf = _filters(q, cfg)
-    f = _merge_filter(hard, qf)
+    f = dict(hard)
+    hints = _hints(q, cfg)  # 只加权，不过滤
 
     s = config.settings()
-    top_k = int(s.get("top_k", 5))
+    top_k = int(s.get("top_k", 8))
     threshold = float(s.get("min_relevance", 0.22))
     gate = max(0.12, threshold * 0.5)
 
     rows, terms, best, used_f, relaxed = [], [], 0.0, f, ""
     fallback = None
-    for cand_f, note in _ladder(f, hard, qf):
+    for cand_f, note in _ladder(f, hard, {}):
         pool = _pool(cat, cand_f)
         if not pool:
             continue
-        r, t, br = _rank(q, pool, cfg, top_k)
+        r, t, br = _rank(q, pool, cfg, cat, top_k, hints)
         if not r:
             continue
         if br >= gate:
@@ -332,28 +379,29 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
             fallback = (r, t, br, cand_f, note)
     if not rows and fallback:
         rows, terms, best, used_f, relaxed = fallback
-    if not rows or best < gate:
+    if not rows:
         return {"answer": NOT_FOUND + f"。已在「{_where(f)}」及其放宽范围内检索授权可见目录与已入库正文，"
                           "未找到能回答该问题的资料。",
                 "found": False, "sources": [], "mode": "none", "scope": f,
-                "best_score": round(best, 3), "scanned": index.count(),
-                "took_ms": int((time.time() - t0) * 1000)}
+                "total_matched": 0, "best_score": 0,
+                "scanned": index.count(), "took_ms": int((time.time() - t0) * 1000)}
 
     where = _where(used_f)
     if _is_find_intent(q, cfg):
-        # 「找资料」要精准：至少命中一个用户原词，且相关度接近最佳命中，
-        # 避免宽泛范围里把整个分类的几百份都列进来（如问 CET6 却返回 402 份试卷）。
-        precise = [r for r in rows if r.get("core_hit", 0) > 0 and r["score"] >= rows[0]["score"] * 0.55]
-        # 若问题里有明确英文/编号词（CET6），只保留文件名真的含该词的，避免 CET4 混进来
-        latin = [r for r in (precise or rows) if r.get("latin_hit", 0) > 0]
-        if latin:
-            precise = latin
+        # 命中过用户原词的排前面；问题里有具体英文/编号（CET6）时只保留文件名真含该词的，
+        # 避免 CET4 混进 CET6 的结果。一般问题不再用 0.55 分数闸门砍掉真实命中。
+        precise = [r for r in rows if r.get("core_hit", 0) > 0]
+        if latin_tokens := {t for t in terms if re.fullmatch(r"[a-z0-9_.+#-]{3,}", t)
+                            and t in q.lower()}:
+            latin = [r for r in (precise or rows) if r.get("latin_hit", 0) > 0]
+            if latin:
+                precise = latin
         return _catalog_answer(q, precise or rows, used_f, cat, t0, relaxed,
                                bool(META_INTENT.search(q)))
 
-    kept = [r for r in rows[:top_k * 2] if r["rel"] >= gate][:top_k] or rows[:top_k]
-    per = max(600, int(int(s.get("max_context_chars", 4200)) / max(1, len(kept))))
-    valid = sorted({t for r in kept for t in r["hit"]}, key=lambda t: (-len(t), t))
+    kept = rows[:top_k]
+    per = max(600, int(int(s.get("max_context_chars", 12000)) / max(1, len(kept))))
+    valid = sorted({t for r in kept for t in r["hit"]}, key=lambda t: (-len(t), t))[:24]
     ctx = []
     for i, r in enumerate(kept, 1):
         x, body = r["x"], r["body"]
@@ -367,10 +415,11 @@ def answer(q: str, cat: dict | None = None, fast: bool = False, scope: list | No
     scope_head = f"【检索范围：{where}】只依据该范围内的资料片段回答，不得借用范围外知识。\n"
     if relaxed:
         scope_head += f"【说明】{relaxed}，回答时不要声称范围内没有资料。\n"
-    context = scope_head + "\n".join(ctx)[:int(s.get("max_context_chars", 4200))]
+    context = scope_head + "\n".join(ctx)[:int(s.get("max_context_chars", 12000))]
     result = {"found": True, "scope": used_f, "relaxed": relaxed,
               "sources": [_source(r["x"], i + 1, r["score"]) for i, r in enumerate(kept)],
-              "scanned": index.count(), "best_score": round(best, 3)}
+              "total_matched": len(rows), "scanned": index.count(),
+              "best_score": round(best, 3)}
 
     if fast:
         result.update({"answer": _local_answer(kept), "mode": "fast"})

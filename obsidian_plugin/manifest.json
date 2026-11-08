@@ -1,9 +1,9 @@
 {
   "id": "resource-manager-ai",
   "name": "资源 AI 搜索",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minAppVersion": "1.4.0",
-  "description": "基于本地资源管理库的 grounded 问答：简短回答 + 可点击的源文件索引，查不到如实说明。",
+  "description": "本地知识库 grounded 问答：检索全部资料、读取已导入文件完整正文、可点击源文件索引，查不到如实说明。",
   "author": "resource-manager",
   "isDesktopOnly": false
 }

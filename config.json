@@ -1,6 +1,11 @@
 {
   "vault": "",
   "vault_name": "QQ群资料Obsidian库",
+  "note_body_chars": 20000,
+  "obsidian": {
+    "open_after_import": true,
+    "open_file": "00-本次导入.md"
+  },
   "local_import_dirs": [
     "{home}/WorkBuddy/2026-11-06-15-42-58/qq2obsidian/inbox",
     "{desktop}/QQ资料自动入库",
@@ -952,8 +957,8 @@
       "disable_thinking": true
     },
     "min_relevance": 0.22,
-    "top_k": 5,
-    "max_context_chars": 4200,
+    "top_k": 8,
+    "max_context_chars": 12000,
     "max_answer_chars": 260,
     "timeout": 60
   }
